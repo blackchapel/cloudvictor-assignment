@@ -20,7 +20,7 @@ Open the link in any browser. The Swagger UI loads instantly with the latest ver
 
 ---
 
-### 2. Local — Open in Browser
+### 2. Local - Open in Browser
 
 For offline access or local development.
 
@@ -31,17 +31,6 @@ For offline access or local development.
 1. Clone or download this repository
 2. Navigate to the project folder
 3. Open `index.html` directly in your browser
-
-```bash
-# macOS
-open index.html
-
-# Linux
-xdg-open index.html
-
-# Windows
-start index.html
-```
 
 > **Note:** When running locally via the file system, the YAML path is resolved
 > relatively (`./therapy-api.yaml`). Both `index.html` and `therapy-api.yaml`
@@ -79,7 +68,7 @@ http://localhost:8080
 ```bash
 docker run -p 8080:8080 \
   -e SWAGGER_JSON=/tmp/therapy-api.yaml \
-  -v $(pwd)/therapy-api.yaml:/tmp/therapy-api.yaml \
+  -v $(pwd)/swagger/therapy-api.yaml:/tmp/therapy-api.yaml \
   swaggerapi/swagger-ui
 ```
 
@@ -88,7 +77,7 @@ docker run -p 8080:8080 \
 ```powershell
 docker run -p 8080:8080 `
   -e SWAGGER_JSON=/tmp/therapy-api.yaml `
-  -v ${PWD}/therapy-api.yaml:/tmp/therapy-api.yaml `
+  -v ${PWD}/swagger/therapy-api.yaml:/tmp/therapy-api.yaml `
   swaggerapi/swagger-ui
 ```
 
