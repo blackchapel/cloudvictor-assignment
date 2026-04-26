@@ -11,24 +11,63 @@ info:
       views authorised client journals, and messages clients.
 
     ## Authentication
-    All endpoints except `/auth/**` require a valid JWT Bearer token obtained from the
-    respective login endpoint. The token encodes the caller's `userId` and `userType`
+    All endpoints except `/auth/**` require a valid JWT Bearer token obtained from
+    `POST /auth/login`. The token encodes the caller's `userId` and `userType`
     (`CLIENT` or `THERAPIST`). Every handler must validate that the token's identity
-    matches the resource being accessed — e.g. a client cannot read another client's
-    journal, and a therapist cannot read a client's journal without `GRANTED` access.
+    matches the resource being accessed.
+
+    ## Relationship Types
+    A client and therapist can be connected in three independent ways:
+    - **Mapping**: a formal, ongoing therapeutic relationship with its own approval
+      flow and journal access control. This is the only gateway to journal access.
+    - **Appointment**: a client books a one-off session slot created by a therapist.
+      Does not require or auto-create a mapping.
+    - **Message**: a direct message exchange between the two parties.
+      Requires any existing relationship (mapping, appointment, or prior message).
+
+    ## Mapping & Journal Access
+    Mapping and journal access are two separate concerns controlled independently:
+
+    - **Mapping** must be `APPROVED` by the non-initiating party before the formal
+      therapeutic relationship is active.
+    - **Journal Access** must be `GRANTED` by the client before a therapist can
+      read the client's journal.
+    - **Both conditions must be met simultaneously** for a therapist to view a journal:
+      `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.
+
+    Either party may initiate a mapping. Journal access can be requested at mapping
+    creation time via the `journalAccess` field, or separately via
+    `PATCH /mappings/{mappingId}/journal-access`.
+
+    ## Session Lifecycle
+    Sessions are created by therapists as bookable slots. The full lifecycle is:
+
+    `SCHEDULED` → `IN_PROGRESS` → `COMPLETED`
+
+    A session can only be started once a client's appointment is `CONFIRMED` and
+    the current server time is on or after `scheduledAt`. Starting a session
+    automatically completes the appointment when the session is ended.
+
+    ## Emotion Journal
+    Clients log emotions using the vocabulary defined in the
+    [Emotion-Feelings reference](https://tomdrummond.com/wp-content/uploads/2019/11/Emotion-Feelings.pdf).
+    Each entry records an emotion category (e.g. Happiness, Fear, Anger),
+    a specific feeling within that category, and an intensity level (STRONG, MEDIUM, LIGHT).
 
     ## Access Rules (summary)
     | Resource | CLIENT | THERAPIST |
     |---|---|---|
     | Own profile | Full CRUD | Full CRUD |
-    | Other user profile | Read therapist profiles | Read mapped client profiles |
-    | Journal entries | Own only (write) | Mapped client with `GRANTED` access (read-only) |
-    | Session | None | Own sessions (full CRUD) |
-    | Session private notes | ✗ | Own sessions only |
-    | Session shared notes | Read (if CONFIRMED appointment) | Own sessions (read/write) |
+    | Other profile | Read any therapist profile | Read connected client profiles |
+    | Connected parties list | `GET /clients/{clientId}/therapists` | `GET /therapists/{therapistId}/clients` |
+    | Journal entries (write) | Own only | ✗ Never |
+    | Journal entries (read) | Own only | Mapped client with `APPROVED` mapping + `GRANTED` access |
+    | Sessions | Read available sessions | Full CRUD on own sessions |
+    | Session private notes | ✗ Never | Own sessions only |
+    | Session shared notes | Read if CONFIRMED/COMPLETED appointment | Own sessions (read/write) |
     | Messages | Participant only | Participant only |
-    | Appointments | Own (create/cancel) | Own sessions (confirm/cancel) |
-    | Search | Own data + available therapists | Own data + mapped clients |
+    | Appointments | Own (create/cancel) | Own sessions (confirm/reject/cancel/complete) |
+    | Search | Own journal + shared session notes | Private session notes + shared session notes + accessible client journals |
 
   version: 1.0.0
 
@@ -1452,7 +1491,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Filter by therapists name.
+          description: Filter by therapist's name.
         - name: relationshipType
           in: query
           required: false
@@ -1651,7 +1690,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Filter by clients name.
+          description: Filter by client's name.
         - name: relationshipType
           in: query
           required: false
