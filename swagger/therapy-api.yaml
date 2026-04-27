@@ -2201,11 +2201,7 @@ paths:
       description: >
         Sends a message from the authenticated user to the other party in a
         client-therapist conversation. The `senderType` and `senderId` are derived
-        from the JWT — not from the request body — to prevent spoofing.
-
-        **Precondition**: a mapping (any `mappingStatus`) must exist between the
-        `clientId` and `therapistId` in the request. If no mapping exists, returns 403.
-        This prevents unsolicited messages from strangers.
+        from the JWT and not from the request body, to prevent spoofing.
       operationId: sendMessage
       requestBody:
         required: true
@@ -2237,7 +2233,7 @@ paths:
       description: >
         Returns the chronological message history between a specific client-therapist pair.
         Both `clientId` and `therapistId` are required. The caller must be one of the two
-        participants — attempting to read a thread you are not part of returns 403.
+        participants, attempting to read a thread you are not part of returns 403.
       operationId: listMessages
       parameters:
         - name: clientId
