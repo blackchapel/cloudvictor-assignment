@@ -6,7 +6,7 @@ Interactive API documentation for the Therapy Journalling backend, built with Op
 
 ## Accessing the API Docs
 
-There are three ways to view and interact with the Swagger UI.
+There are four ways to view and interact with the Swagger UI.
 
 ---
 
@@ -38,7 +38,24 @@ For offline access or local development.
 
 ---
 
-### 3. Docker
+### 3. Swagger Editor Online
+
+No installation required. Paste the spec directly into the official Swagger Editor.
+
+**Steps:**
+
+1. Open [editor.swagger.io](https://editor.swagger.io) in your browser
+2. Delete the default content on the left panel
+3. Open `therapy-api.yaml` from this repository and copy its entire contents
+4. Paste into the left panel of the Swagger Editor
+5. The rendered Swagger UI appears instantly on the right panel
+
+> **Note:** The Swagger Editor also validates your spec in real time and highlights
+> any syntax or schema errors in the left panel as you edit.
+
+---
+
+### 4. Docker
 
 Serves the Swagger UI via a local web server on port `8080`.
 
