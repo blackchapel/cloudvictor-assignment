@@ -1,0 +1,858 @@
+# ================================================================
+# Therapy Journalling API — DynamoDB Schema Design
+# ================================================================
+#
+# Best Practices Applied:
+#   - Access-pattern-first design (NoSQL design philosophy)
+#   - Single-table design used where multiple entity types share a partition:
+#       JournalTable: JOURNAL metadata + ENTRY items co-located on clientId
+#       MessageTable: all thread messages co-located on THREAD#{clientId}#{therapistId}
+#   - Natural primary keys (userId, mappingId, appointmentId, sessionId, etc.), no artificial
+#     prefixes on single-entity tables. Composite/prefixed keys only where semantically
+#     justified: THREAD#{clientId}#{therapistId} (composite thread identifier),
+#     clientId#emotion (GSI namespace scoping)
+#   - Sort keys only where genuinely needed:
+#       Range queries: MSG#{sentAt}#{messageId}
+#       Multi-item-type partitions: JOURNAL | entry SK
+#       Meaningful composite key: therapistId as SK in RelationshipTable
+#       Constant SKs (METADATA, PROFILE) have been REMOVED — they add zero value
+#   - Sparse GSIs using optional attributes
+#   - Composite GSI partition keys for multi-attribute queries without Scan
+#   - Atomic counters for totalEntries via UpdateItem ADD expression
+#   - TransactWriteItems for multi-table atomic operations
+#   - KEYS_ONLY projections on dedup GSIs to minimise RCU cost
+#
+# Format Reference:
+#   TABLE          Table name
+#   DESCRIPTION    Purpose and design rationale
+#   ATTRIBUTES     name | Type | Role | Description
+#   KEYS           Primary key definition (HASH + RANGE)
+#   GSI            Global Secondary Index block (repeatable)
+#   LSI            Local Secondary Index block (repeatable)
+#   ACCESS_PATTERNS  Per-API query strategy (repeatable)
+#   ---            Table separator
+#
+# Role Values:
+#   PK      Partition key of base table
+#   SK      Sort key of base table
+#   GSI_PK  Partition key of a GSI
+#   GSI_SK  Sort key of a GSI
+#   LSI_SK  Sort key of an LSI (shares base table PK)
+#   ATTR    Regular attribute
+# ================================================================
+
+TABLE UserTable
+
+DESCRIPTION
+  Single table for both CLIENT and THERAPIST accounts. userId is the natural
+  partition keym no prefix needed since this is a single-entity-type table with
+  no ambiguity. No sort key, each user has exactly one item. Therapist-only
+  attributes (licenseNumber, specialization, bio, qualification, yearsOfExperience)
+  are absent on CLIENT items, creating naturally sparse indexes.
+  GSI_EmailIndex enables O(1) login lookup without a full table scan.
+  GSI_UserTypeIndex powers the therapist discovery endpoint by co-locating
+  all THERAPIST items on one GSI partition, sorted by registration date.
+
+ATTRIBUTES
+  userId            String    PK      Unique user ID. Prefix cli_ (client) or thr_ (therapist)
+  userType          String    GSI_PK  CLIENT or THERAPIST. GSI_UserTypeIndex partition key
+  email             String    GSI_PK  User email. GSI_EmailIndex partition key
+  password          String    ATTR    bcrypt hash. Never included in API responses
+  name              String    ATTR    Full display name
+  phoneNumber       String    ATTR    Optional contact number
+  createdAt         String    ATTR    ISO 8601 creation timestamp
+  updatedAt         String    ATTR    ISO 8601 last-updated timestamp
+  licenseNumber     String    ATTR    THERAPIST only. Professional license number
+  specialization    String    ATTR    THERAPIST only. Area of specialization
+  bio               String    ATTR    THERAPIST only. Professional biography
+  qualification     String    ATTR    THERAPIST only. Academic qualification
+  yearsOfExperience  Number    GSI_SK  THERAPIST only. Mandatory. Range key on GSI_UserTypeIndex
+
+KEYS
+  HASH    userId
+
+GSI
+  NAME        GSI_EmailIndex
+  HASH        email
+  RANGE       userType
+  PROJECTION  INCLUDE userId, userType, email, password, name, phoneNumber, createdAt, updatedAt,
+                      licenseNumber, specialization, bio, qualification, yearsOfExperience
+  DESCRIPTION O(1) login lookup by email without scanning the full table. userType
+              as range key allows exact-match filtering in a single Query.
+              INCLUDE projection with password explicitly listed — password is intentionally
+              present here for login credential verification, not included by accident.
+              Explicit projection ensures any future sensitive attribute added to UserTable
+              does not automatically appear in this index without a conscious decision.
+              Application enforces email uniqueness at write time via this GSI.
+
+GSI
+  NAME        GSI_UserTypeIndex
+  HASH        userType
+  RANGE       yearsOfExperience
+  PROJECTION  INCLUDE userId, userType, name, email, phoneNumber, createdAt, updatedAt,
+                      licenseNumber, specialization, bio, qualification, yearsOfExperience
+  DESCRIPTION Co-locates all THERAPIST items on one GSI partition for GET /therapists.
+              yearsOfExperience as range key enables O(1) key-condition range queries
+              (>= :min, BETWEEN :min AND :max) without a FilterExpression scan overhead.
+              Naturally sparse, CLIENT items carry no yearsOfExperience, keeping the
+              index lean. yearsOfExperience is mandatory for therapists so every
+              THERAPIST item is guaranteed to appear in the index.
+              INCLUDE projection explicitly excludes password — the hash is never needed
+              for a therapist discovery query and must never appear in list responses.
+              FilterExpression applied post-query for name/specialization/bio/qualification search.
+              For production we should use Amazon OpenSearch Service for full-text search.
+
+ACCESS_PATTERNS
+  API         POST /auth/clients/register
+  OPERATION   Query + PutItem
+  INDEX       GSI_EmailIndex then UserTable
+  KEYS        userId = :userId
+  NOTES       1. Query GSI_EmailIndex (email = :email) to verify email uniqueness.
+              2. PutItem with ConditionExpression attribute_not_exists(userId).
+              Journal item auto-created in JournalTable in same transaction.
+
+ACCESS_PATTERNS
+  API         POST /auth/therapists/register
+  OPERATION   Query + PutItem
+  INDEX       GSI_EmailIndex then UserTable
+  KEYS        userId = :userId
+  NOTES       Same flow as client registration with therapist-specific attributes.
+              ConditionExpression attribute_not_exists(userId) prevents duplicate IDs.
+
+ACCESS_PATTERNS
+  API         POST /auth/login
+  OPERATION   Query
+  INDEX       GSI_EmailIndex
+  KEYS        email = :email, userType = :userType
+  NOTES       Returns user item.
+              Returns 401 on mismatch. Vague response prevents user enumeration.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}
+  OPERATION   GetItem
+  INDEX       UserTable
+  KEYS        userId = :clientId
+  NOTES       O(1) direct lookup. password excluded via ProjectionExpression.
+              Therapist callers validated against RelationshipTable before access.
+
+ACCESS_PATTERNS
+  API         GET /therapists/{therapistId}
+  OPERATION   GetItem
+  INDEX       UserTable
+  KEYS        userId = :therapistId
+  NOTES       O(1) direct lookup. All users can view therapist public profiles.
+
+ACCESS_PATTERNS
+  API         GET /therapists
+  OPERATION   Query
+  INDEX       GSI_UserTypeIndex
+  KEYS        userType = THERAPIST
+  FILTER      contains(name, :q) OR contains(specialization, :q) OR contains(bio, :q)
+  NOTES       yearsOfExperience pushed into KeyConditionExpression as range condition
+              (userType = THERAPIST AND yearsOfExperience >= :min) — no scan overhead.
+              Omit range condition for unfiltered listing; all therapists present since
+              yearsOfExperience is mandatory. FilterExpression for name/specialization/bio
+              applied post-query. Paginated with ExclusiveStartKey.
+
+ACCESS_PATTERNS
+  API         PUT /clients/{clientId}
+  OPERATION   UpdateItem
+  INDEX       UserTable
+  KEYS        userId = :clientId
+  NOTES       UpdateExpression SET supplied fields + updatedAt = :now.
+              ConditionExpression attribute_exists(userId) prevents ghost writes.
+
+ACCESS_PATTERNS
+  API         PUT /therapists/{therapistId}
+  OPERATION   UpdateItem
+  INDEX       UserTable
+  KEYS        userId = :therapistId
+  NOTES       Same pattern as client update. Only therapist-editable fields updated.
+
+ACCESS_PATTERNS
+  API         DELETE /clients/{clientId}
+  OPERATION   TransactWriteItems (cascade)
+  INDEX       UserTable + JournalTable + MappingTable + RelationshipTable
+  KEYS        userId = :clientId
+  NOTES       TransactWriteItems deletes user item and journal metadata. Cascade
+              deletion of entries, mappings, appointments, messages handled
+              asynchronously via DynamoDB Streams + Lambda in production.
+
+ACCESS_PATTERNS
+  API         DELETE /therapists/{therapistId}
+  OPERATION   TransactWriteItems (cascade)
+  INDEX       UserTable + SessionTable + MappingTable + RelationshipTable
+  KEYS        userId = :therapistId
+  NOTES       Cascades to owned sessions, notes, and mappings. Client appointments
+              auto-transitioned to CANCELLED via stream processor.
+
+---
+
+TABLE MappingTable
+
+DESCRIPTION
+  Stores formal client-therapist therapeutic relationships. mappingId is the natural partition key, no prefix or sort key needed since this is a single-entity-type table. Three GSIs cover every access pattern: GSI_ClientMappings lists a client's mappings, GSI_TherapistMappings lists a therapist's mappings, and GSI_ClientTherapistLookup enables O(1) conflict detection at mapping creation. Mappings represent a formal long-term therapeutic commitment between the two parties. State machine transitions are enforced via DynamoDB ConditionExpressions to prevent race conditions. TransactWriteItems ensures atomic updates across MappingTable and RelationshipTable.
+
+ATTRIBUTES
+  mappingId           String    PK      Unique mapping ID
+  clientId            String    GSI_PK  GSI_ClientMappings and GSI_ClientTherapistLookup PK
+  therapistId         String    GSI_PK  GSI_TherapistMappings PK. GSI_ClientTherapistLookup SK
+  mappingStatus       String    ATTR    PENDING | APPROVED | REJECTED
+  journalAccessStatus  String    ATTR    NONE | REQUESTED | GRANTED | REVOKED
+  initiatedBy         String    ATTR    CLIENT or THERAPIST. Drives approval logic
+  createdAt           String    GSI_SK  ISO 8601. Range key on client and therapist GSIs
+  updatedAt           String    ATTR    ISO 8601
+
+KEYS
+  HASH    mappingId
+
+GSI
+  NAME        GSI_ClientMappings
+  HASH        clientId
+  RANGE       createdAt
+  PROJECTION  ALL
+  DESCRIPTION Lists all mappings for a client sorted by creation date.
+              Used by GET /mappings (CLIENT caller) and for existence checks.
+
+GSI
+  NAME        GSI_TherapistMappings
+  HASH        therapistId
+  RANGE       createdAt
+  PROJECTION  ALL
+  DESCRIPTION Lists all mappings for a therapist sorted by creation date.
+              Used by GET /mappings (THERAPIST caller).
+
+GSI
+  NAME        GSI_ClientTherapistLookup
+  HASH        clientId
+  RANGE       therapistId
+  PROJECTION  KEYS_ONLY
+  DESCRIPTION Point lookup for a specific client+therapist pair. Used for:
+              1. POST /mappings — conflict detection (409 if mapping exists).
+              KEYS_ONLY projection sufficient — only existence matters, mapping
+              data is never needed from this index.
+
+ACCESS_PATTERNS
+  API         POST /mappings
+  OPERATION   Query + PutItem
+  INDEX       GSI_ClientTherapistLookup then MappingTable
+  KEYS        clientId = :clientId, therapistId = :therapistId
+  NOTES       1. Query GSI_ClientTherapistLookup — return 409 if any item returned.
+              2. PutItem with ConditionExpression attribute_not_exists(mappingId).
+              3. Set journalAccessStatus = REQUESTED (therapist) or GRANTED (client)
+                 if journalAccess = true in the request body.
+              4. UpdateItem RelationshipTable to add MAPPING to relationshipTypes.
+
+ACCESS_PATTERNS
+  API         GET /mappings
+  OPERATION   Query
+  INDEX       GSI_ClientMappings (CLIENT) | GSI_TherapistMappings (THERAPIST)
+  KEYS        clientId = :callerId | therapistId = :callerId
+  FILTER      mappingStatus = :status (optional), journalAccessStatus = :jas (optional)
+  NOTES       Caller type from JWT selects appropriate GSI. Paginated.
+
+ACCESS_PATTERNS
+  API         GET /mappings/{mappingId}
+  OPERATION   GetItem
+  INDEX       MappingTable
+  KEYS        mappingId = :mappingId
+  NOTES       O(1) direct lookup. Application verifies clientId or therapistId
+              matches JWT caller — returns 403 otherwise (not 404).
+
+ACCESS_PATTERNS
+  API         PATCH /mappings/{mappingId}/mapping-status
+  OPERATION   UpdateItem
+  INDEX       MappingTable
+  KEYS        mappingId = :mappingId
+  NOTES       ConditionExpression: mappingStatus = PENDING AND initiatedBy <> :callerType.
+              Rejects if caller is the initiating party (403) or wrong transition (422).
+              On APPROVED: UpdateItem RelationshipTable to sync mappingStatus.
+
+ACCESS_PATTERNS
+  API         PATCH /mappings/{mappingId}/journal-access
+  OPERATION   TransactWriteItems
+  INDEX       MappingTable + RelationshipTable
+  KEYS        mappingId = :mappingId
+  NOTES       ConditionExpression enforces per-caller allowed transitions.
+              Auto-approve: if client sets GRANTED and mappingStatus = PENDING,
+              TransactWriteItems atomically sets journalAccessStatus = GRANTED
+              AND mappingStatus = APPROVED in one call. RelationshipTable synced.
+
+ACCESS_PATTERNS
+  API         DELETE /mappings/{mappingId}
+  OPERATION   TransactWriteItems
+  INDEX       MappingTable + RelationshipTable
+  KEYS        mappingId = :mappingId
+  NOTES       Atomically: 1. DeleteItem mapping.
+              2. DELETE MAPPING from RelationshipTable relationshipTypes StringSet.
+              If set becomes empty, delete the RelationshipTable item entirely.
+
+---
+
+TABLE RelationshipTable
+
+DESCRIPTION
+  Denormalised aggregation table tracking ALL connections between a client and
+  therapist regardless of type (MAPPING, APPOINTMENT, MESSAGE). Written through
+  whenever any connection is created or removed. Eliminates cross-table joins
+  for the connected-parties list endpoints. Eventual consistency with source
+  tables is acceptable for list views; authoritative checks (e.g. APPROVED
+  mapping for booking) always query source tables directly. The StringSet
+  relationshipTypes supports atomic ADD/DELETE operations — idempotent and
+  safe for concurrent writes.
+
+ATTRIBUTES
+  clientId            String     PK      Client user ID. Natural partition key
+  therapistId         String     SK      Therapist user ID. Natural sort key — uniquely identifies the client-therapist pair. Meaningful range key: enables querying all therapists for a client (base table) or all clients for a therapist (GSI_TherapistRelationships)
+  relationshipTypes   StringSet  ATTR    Active types: {MAPPING, APPOINTMENT, MESSAGE}
+  mappingId           String     ATTR    Present if a mapping exists. Absent otherwise
+  mappingStatus       String     ATTR    Current mapping status. Absent if no mapping
+  journalAccessStatus  String     ATTR    Current journal access status. Absent if no mapping
+  createdAt           String     ATTR    Timestamp of first relationship
+  updatedAt           String     ATTR    Last modification timestamp
+
+KEYS
+  HASH    clientId
+  RANGE   therapistId
+
+GSI
+  NAME        GSI_TherapistRelationships
+  HASH        therapistId
+  RANGE       clientId
+  PROJECTION  ALL
+  DESCRIPTION Therapist-keyed view of all connected clients.
+              Used by GET /therapists/{therapistId}/clients. Mirrors the base
+              table query pattern from the client perspective.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}/therapists
+  OPERATION   Query
+  INDEX       RelationshipTable
+  KEYS        clientId = :clientId
+  FILTER      contains(relationshipTypes, :type) (optional)
+  NOTES       Returns all relationship items for this client. Full therapist profiles
+              fetched via BatchGetItem on UserTable using therapistId values. Paginated.
+
+ACCESS_PATTERNS
+  API         GET /therapists/{therapistId}/clients
+  OPERATION   Query
+  INDEX       GSI_TherapistRelationships
+  KEYS        therapistId = :therapistId
+  FILTER      contains(relationshipTypes, :type) (optional)
+  NOTES       Full client profiles fetched via BatchGetItem on UserTable. Paginated.
+
+---
+
+TABLE JournalTable
+
+DESCRIPTION
+  Single-table design for journal metadata and emotion entries. Both item types
+  share partition key clientId, co-locating a client's metadata and all their
+  entries on the same DynamoDB partition for efficient reads. Two item types:
+  JOURNAL (one per client, metadata only) and entries identified by a stable
+  entryId sort key. entryId is a server-generated UUID — immutable, requires
+  no client-side key tracking, and enables O(1) single-item operations without
+  any auxiliary key. emotionTimestamp is a plain mutable attribute: updating it
+  is a simple UpdateItem with no sort key migration.
+  LSI_EmotionTime provides time-ordered listing by emotionTimestamp on the same
+  partition (no extra RCU hop). LSI_IntensityTime handles intensity+date queries
+  on the same partition. GSI_EmotionEntries uses composite key clientId#emotion
+  to scope the GSI partition to one client+emotion, preventing cross-client leakage.
+  totalEntries on the JOURNAL item is maintained as an atomic counter.
+  Access control: therapist may read only if mappingStatus=APPROVED and
+  journalAccessStatus=GRANTED.
+
+ATTRIBUTES
+  clientId          String    PK      Client user ID. Natural partition key (all item types)
+  SK                String    SK      JOURNAL (metadata item) | entryId (entry items)
+  journalId         String    ATTR    Unique journal ID. Present on JOURNAL item only
+  totalEntries      Number    ATTR    Atomic entry count. Present on JOURNAL item only
+  entryId           String    ATTR    Unique entry ID. Also the SK value on entry items
+  emotion           String    ATTR    Happiness | Caring | Depression | Inadequate | Fear | Confusion | Hurt | Anger | Loneliness | Remorse
+  feeling           String    ATTR    Specific feeling within the emotion category
+  intensity         String    ATTR    STRONG | MEDIUM | LIGHT
+  emotionTimestamp  String    LSI_SK  When the emotion was actually felt (ISO 8601). LSI_EmotionTime range key. Fully mutable — no sort key migration needed on update
+  intensityTime     String    LSI_SK  Composite: intensity#emotionTimestamp. LSI_IntensityTime range key
+  clientEmotion     String    GSI_PK  Composite: clientId#emotion. GSI_EmotionEntries PK
+  notes             String    ATTR    Optional free-text from client
+  createdAt         String    ATTR    ISO 8601 creation timestamp
+  updatedAt         String    ATTR    ISO 8601 last-updated timestamp
+
+KEYS
+  HASH    clientId
+  RANGE   SK
+
+LSI
+  NAME        LSI_EmotionTime
+  RANGE       emotionTimestamp
+  PROJECTION  ALL
+  DESCRIPTION Time-ordered entry listing per client by when the emotion was felt.
+              Query: clientId = :cid, emotionTimestamp BETWEEN :from AND :to.
+              ScanIndexForward=true for chronological order, false for reverse.
+              LSI shares the base table PK — no extra partition hop, lower latency and cost.
+              Naturally sparse — JOURNAL item carries no emotionTimestamp attribute.
+
+LSI
+  NAME        LSI_IntensityTime
+  RANGE       intensityTime
+  PROJECTION  ALL
+  DESCRIPTION Intensity+date range queries within a single client's journal.
+              intensityTime = intensity#emotionTimestamp (e.g. STRONG#2024-06-01T10:00:00Z).
+              BETWEEN queries cover a specific intensity bucket over a date range.
+              LSI shares the base table PK — no extra partition hop, lower latency and cost.
+
+GSI
+  NAME        GSI_EmotionEntries
+  HASH        clientEmotion
+  RANGE       emotionTimestamp
+  PROJECTION  ALL
+  DESCRIPTION Emotion-category filter for a specific client's journal entries.
+              clientEmotion composite key (clientId#emotion) scopes the GSI partition
+              to one client+emotion combination, preventing cross-client data leakage
+              and keeping individual GSI partitions small. emotionTimestamp range key
+              enables optional date range filtering in the same Query call.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}/journal
+  OPERATION   GetItem
+  INDEX       JournalTable
+  KEYS        clientId = :clientId, SK = JOURNAL
+  NOTES       O(1) metadata lookup. Returns journalId and totalEntries counter.
+              Therapist callers must have mappingStatus=APPROVED + journalAccessStatus=GRANTED.
+
+ACCESS_PATTERNS
+  API         POST /clients/{clientId}/journal/entries
+  OPERATION   TransactWriteItems
+  INDEX       JournalTable
+  KEYS        clientId = :clientId, SK = entryId
+  NOTES       Atomically: 1. PutItem new entry item (SK = server-generated entryId).
+              2. UpdateItem JOURNAL item: ADD totalEntries 1, SET updatedAt = :now.
+              Compute clientEmotion = clientId#emotion and
+              intensityTime = intensity#emotionTimestamp before writing.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}/journal/entries (date range)
+  OPERATION   Query
+  INDEX       LSI_EmotionTime
+  KEYS        clientId = :clientId, emotionTimestamp BETWEEN :from AND :to
+  NOTES       Time-ordered by emotionTimestamp via LSI — no GSI required.
+              ScanIndexForward=true for chronological order.
+              Paginated with ExclusiveStartKey. intensity FilterExpression combinable.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}/journal/entries (emotion filter)
+  OPERATION   Query
+  INDEX       GSI_EmotionEntries
+  KEYS        clientEmotion = {clientId}#{emotion}, emotionTimestamp BETWEEN :from AND :to
+  NOTES       Fully scoped to one client+emotion. Optional date range on GSI sort key.
+              intensity FilterExpression combinable for further narrowing.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}/journal/entries (intensity filter)
+  OPERATION   Query
+  INDEX       LSI_IntensityTime
+  KEYS        clientId = :clientId, intensityTime BETWEEN {intensity}#{from} AND {intensity}#{to}
+  NOTES       LSI query — no extra partition hop. Composite sort key handles intensity
+              and date in one expression with zero FilterExpression overhead.
+
+ACCESS_PATTERNS
+  API         GET /clients/{clientId}/journal/entries/{entryId}
+  OPERATION   GetItem
+  INDEX       JournalTable
+  KEYS        clientId = :clientId, SK = entryId
+  NOTES       O(1) direct lookup by entryId alone. No emotionTimestamp required.
+
+ACCESS_PATTERNS
+  API         PUT /clients/{clientId}/journal/entries/{entryId}
+  OPERATION   UpdateItem
+  INDEX       JournalTable
+  KEYS        clientId = :clientId, SK = entryId
+  NOTES       Simple UpdateItem regardless of whether emotionTimestamp changes —
+              it is a plain attribute, no sort key migration needed.
+              Re-compute and SET intensityTime and clientEmotion if emotion,
+              intensity, or emotionTimestamp is updated.
+
+ACCESS_PATTERNS
+  API         DELETE /clients/{clientId}/journal/entries/{entryId}
+  OPERATION   TransactWriteItems
+  INDEX       JournalTable
+  KEYS        clientId = :clientId, SK = entryId
+  NOTES       Atomically: 1. DeleteItem entry item.
+              2. UpdateItem JOURNAL item: ADD totalEntries -1, SET updatedAt = :now.
+
+---
+
+TABLE MessageTable
+
+DESCRIPTION
+  Thread-keyed table for client-therapist messages. threadKey
+  (THREAD#{clientId}#{therapistId}) co-locates all messages for a conversation
+  on the same partition for efficient sequential reads. Sort key messageSk (sentAt#messageId) provides natural chronological ordering and guarantees uniqueness for simultaneous messages.
+  GSI_MessageById enables O(1) single-message lookup by messageId.
+  senderId and senderType are derived server-side from the JWT, never from
+  the request body, to prevent spoofing.
+
+ATTRIBUTES
+  threadKey    String    PK      Format: THREAD#{clientId}#{therapistId}. Composite — no single attribute uniquely identifies a thread
+  messageSk    String    SK      Format: sentAt#messageId. Chronological order with UUID suffix for uniqueness
+  messageId    String    GSI_PK  Unique message ID. GSI_MessageById partition key
+  clientId     String    ATTR    Client in this conversation thread
+  therapistId  String    ATTR    Therapist in this conversation thread
+  senderType   String    ATTR    CLIENT or THERAPIST. Set from JWT, never from request body
+  senderId     String    ATTR    userId of sender. Set from JWT, never from request body
+  content      String    ATTR    Message body. Max 2000 characters
+  sentAt       String    ATTR    ISO 8601 send timestamp
+
+KEYS
+  HASH    threadKey
+  RANGE   messageSk
+
+GSI
+  NAME        GSI_MessageById
+  HASH        messageId
+  RANGE       sentAt
+  PROJECTION  ALL
+  DESCRIPTION O(1) single-message lookup by messageId. Only message items carry
+              messageId so no unrelated items pollute this index partition.
+              Used by GET /messages/{messageId} and DELETE /messages/{messageId}.
+
+ACCESS_PATTERNS
+  API         POST /messages
+  OPERATION   PutItem
+  INDEX       MessageTable
+  KEYS        threadKey = THREAD#{clientId}#{therapistId}, messageSk = sentAt#messageId
+  NOTES       senderId and senderType written from JWT — request body values ignored.
+              UpdateItem RelationshipTable: ADD MESSAGE to relationshipTypes StringSet.
+              ADD is idempotent — safe even if MESSAGE already present in the set.
+
+ACCESS_PATTERNS
+  API         GET /messages?clientId=X&therapistId=Y
+  OPERATION   Query
+  INDEX       MessageTable
+  KEYS        threadKey = THREAD#{clientId}#{therapistId}, messageSk begins_with sentAt
+  NOTES       Oldest-first: ScanIndexForward = true. Newest-first: ScanIndexForward = false.
+              Caller validated as clientId or therapistId via JWT before query.
+              Paginated with ExclusiveStartKey on messageSk.
+
+ACCESS_PATTERNS
+  API         GET /messages/{messageId}
+  OPERATION   Query
+  INDEX       GSI_MessageById
+  KEYS        messageId = :messageId
+  NOTES       Application validates caller is clientId or therapistId on returned item.
+
+ACCESS_PATTERNS
+  API         DELETE /messages/{messageId}
+  OPERATION   Query then DeleteItem
+  INDEX       GSI_MessageById then MessageTable
+  KEYS        messageId = :messageId (to retrieve threadKey and messageSk), then threadKey + messageSk to delete
+  NOTES       1. Query GSI_MessageById to retrieve threadKey and messageSk values.
+              2. Validate caller matches senderId (only sender can delete own message).
+              3. DeleteItem on base table using retrieved threadKey and messageSk.
+
+---
+
+TABLE SessionTable
+
+DESCRIPTION
+  Single item per session. Session metadata, private notes, shared notes, and
+  confirmed appointment reference are all stored on one item keyed by sessionId.
+  No sort key, each session has exactly one item, eliminating item-type management.
+  privateNotes and sharedNotes are plain attributes with enforced size limits;
+  access control is application-layer (privateNotes never serialised for CLIENT callers).
+  confirmedAppointmentId and pendingCount are denormalised from AppointmentTable so the
+  UI can render session + appointment state in a single read without cross-table joins.
+  GSI projections use INCLUDE (not ALL) to exclude note attributes from list queries,
+  note content is only fetched on single-item reads, keeping list RCU cost low.
+  GSI_TherapistSessions lists a therapist's sessions sorted by scheduled time.
+  GSI_StatusSchedule powers the client-facing session browser.
+
+ATTRIBUTES
+  sessionId               String    PK      Unique session ID. Natural partition key
+  therapistId             String    GSI_PK  GSI_TherapistSessions PK
+  title                   String    ATTR    Session title. Max 200 characters
+  description             String    ATTR    Session description. Max 1000 characters
+  scheduledAt             String    GSI_SK  ISO 8601. Range key on both GSIs
+  durationMinutes         Number    ATTR    Duration in minutes. Minimum 15
+  isAvailable             Boolean   ATTR    Whether slot accepts new appointment requests
+  status                  String    GSI_PK  SCHEDULED|IN_PROGRESS|COMPLETED|CANCELLED. GSI_StatusSchedule PK
+  startedAt               String    ATTR    ISO 8601. Absent until session started
+  endedAt                 String    ATTR    ISO 8601. Absent until session ended
+  confirmedAppointmentId  String    ATTR    ID of the CONFIRMED appointment. Absent if unbooked. Cleared on cancellation
+  pendingCount            Number    ATTR    Count of PENDING appointment requests. Maintained as atomic counter
+  privateNotes            String    ATTR    Therapist-only notes. Max 10 000 characters. Never serialised for CLIENT callers
+  sharedNotes             String    ATTR    Client-visible session notes. Max 5 000 characters
+  createdAt               String    ATTR    ISO 8601 creation timestamp
+  updatedAt               String    ATTR    ISO 8601 last-updated timestamp
+
+KEYS
+  HASH    sessionId
+
+GSI
+  NAME        GSI_TherapistSessions
+  HASH        therapistId
+  RANGE       scheduledAt
+  PROJECTION  INCLUDE sessionId, therapistId, title, scheduledAt, durationMinutes,
+                      isAvailable, status, confirmedAppointmentId, pendingCount,
+                      createdAt, updatedAt
+  DESCRIPTION Lists sessions owned by a therapist sorted by scheduled time.
+              INCLUDE projection excludes privateNotes and sharedNotes — note content
+              is not needed for list views and excluding it reduces RCU cost per page.
+              confirmedAppointmentId and pendingCount included so the UI can render
+              booking state without a follow-up AppointmentTable query.
+
+GSI
+  NAME        GSI_StatusSchedule
+  HASH        status
+  RANGE       scheduledAt
+  PROJECTION  INCLUDE sessionId, therapistId, title, scheduledAt, durationMinutes,
+                      isAvailable, status, confirmedAppointmentId, pendingCount,
+                      createdAt, updatedAt
+  DESCRIPTION Client-facing session browser. Query status=SCHEDULED with optional
+              scheduledAt range, then FilterExpression isAvailable=true.
+              therapistId FilterExpression applied when client filters by therapist.
+              INCLUDE projection excludes note attributes for same cost reason as above.
+
+ACCESS_PATTERNS
+  API         POST /sessions
+  OPERATION   PutItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       therapistId derived from JWT. Initial state: status=SCHEDULED,
+              isAvailable=true, pendingCount=0.
+              ConditionExpression attribute_not_exists(sessionId) prevents ID collisions.
+
+ACCESS_PATTERNS
+  API         GET /sessions (THERAPIST caller)
+  OPERATION   Query
+  INDEX       GSI_TherapistSessions
+  KEYS        therapistId = :therapistId, scheduledAt BETWEEN :from AND :to
+  FILTER      status = :status (optional), isAvailable = :avail (optional)
+  NOTES       Returns session list with booking state (confirmedAppointmentId,
+              pendingCount) included in projection. Note content excluded.
+              Paginated with ExclusiveStartKey.
+
+ACCESS_PATTERNS
+  API         GET /sessions (CLIENT caller)
+  OPERATION   Query
+  INDEX       GSI_StatusSchedule
+  KEYS        status = SCHEDULED, scheduledAt BETWEEN :from AND :to
+  FILTER      isAvailable = true, therapistId = :id (optional)
+  NOTES       Clients browse available slots. Note content excluded from projection.
+              Client's own appointment status resolved separately via GSI_ClientAppointments
+              (query once, build sessionId→appointmentStatus map, merge into response).
+
+ACCESS_PATTERNS
+  API         GET /sessions/{sessionId}
+  OPERATION   GetItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       Returns full item including notes. privateNotes excluded from response
+              for CLIENT callers at application layer. confirmedAppointmentId present
+              if session is booked.
+
+ACCESS_PATTERNS
+  API         PUT /sessions/{sessionId}
+  OPERATION   UpdateItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       ConditionExpression: therapistId = :callerId enforces ownership.
+              UpdateExpression sets only supplied fields. updatedAt always updated.
+
+ACCESS_PATTERNS
+  API         DELETE /sessions/{sessionId}
+  OPERATION   TransactWriteItems
+  INDEX       SessionTable + AppointmentTable
+  KEYS        sessionId = :sessionId
+  NOTES       1. DeleteItem session.
+              2. Query GSI_SessionAppointments for all appointments on this session.
+              3. BatchWriteItem to set all PENDING/CONFIRMED appointments to CANCELLED.
+
+ACCESS_PATTERNS
+  API         POST /sessions/{sessionId}/start
+  OPERATION   UpdateItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       confirmedAppointmentId present on item — no GSI_SessionAppointments
+              query needed. Return 422 if confirmedAppointmentId is absent.
+              Validate server-side: currentTime >= scheduledAt. Return 422 if early.
+              ConditionExpression: status = SCHEDULED.
+              SET status=IN_PROGRESS, startedAt=:now, isAvailable=false.
+
+ACCESS_PATTERNS
+  API         POST /sessions/{sessionId}/end
+  OPERATION   TransactWriteItems
+  INDEX       SessionTable + AppointmentTable
+  KEYS        sessionId = :sessionId
+  NOTES       ConditionExpression: status = IN_PROGRESS.
+              Atomically: 1. SET status=COMPLETED, endedAt=:now on session.
+              2. SET status=COMPLETED on AppointmentTable item (confirmedAppointmentId).
+
+ACCESS_PATTERNS
+  API         GET /sessions/{sessionId}/notes/private
+  OPERATION   GetItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       CLIENT callers receive 403 before this executes.
+              Return only privateNotes field from the item.
+              THERAPIST must own the session (therapistId = callerId).
+
+ACCESS_PATTERNS
+  API         PUT /sessions/{sessionId}/notes/private
+  OPERATION   UpdateItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       THERAPIST only. ConditionExpression: therapistId = :callerId.
+              Enforce max 10 000 character limit at application layer before write.
+              SET privateNotes = :content, updatedAt = :now.
+
+ACCESS_PATTERNS
+  API         GET /sessions/{sessionId}/notes/shared
+  OPERATION   GetItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       Return only sharedNotes field from the item.
+              CLIENT: verify confirmedAppointmentId is present (has a confirmed appointment).
+              THERAPIST: verify therapistId = callerId.
+
+ACCESS_PATTERNS
+  API         PUT /sessions/{sessionId}/notes/shared
+  OPERATION   UpdateItem
+  INDEX       SessionTable
+  KEYS        sessionId = :sessionId
+  NOTES       THERAPIST only. ConditionExpression: therapistId = :callerId.
+              Enforce max 5 000 character limit at application layer before write.
+              SET sharedNotes = :content, updatedAt = :now.
+
+---
+
+TABLE AppointmentTable
+
+DESCRIPTION
+  Stores appointment requests from clients for therapist session slots
+  Four GSIs cover every access pattern. GSI_ClientAppointments and GSI_TherapistAppointments support paginated list views. GSI_SessionAppointments groups appointments by session and status — critical for confirming one and batch-rejecting others atomically. GSI_ClientSessionDedup uses composite key clientId#sessionId for O(1) duplicate prevention with KEYS_ONLY projection to minimise read cost. The CONFIRM transition is the most complex write: a TransactWriteItems call confirms the target, batch-rejects all other PENDING appointments for the same session, and flips isAvailable=false on SessionTable.
+
+ATTRIBUTES
+  appointmentId   String    PK      Unique appointment ID. Natural partition key. No prefix needed — single entity type
+  sessionId       String    GSI_PK  GSI_SessionAppointments partition key
+  clientId        String    GSI_PK  GSI_ClientAppointments partition key
+  therapistId     String    GSI_PK  GSI_TherapistAppointments partition key
+  status          String    GSI_SK  PENDING|CONFIRMED|CANCELLED|COMPLETED|REJECTED
+  clientSession   String    GSI_PK  Composite: clientId#sessionId. Dedup GSI PK
+  requestedAt     String    GSI_SK  ISO 8601. Range key on client and therapist GSIs
+  updatedAt       String    ATTR    ISO 8601
+
+KEYS
+  HASH    appointmentId
+
+GSI
+  NAME        GSI_ClientAppointments
+  HASH        clientId
+  RANGE       requestedAt
+  PROJECTION  ALL
+  DESCRIPTION Lists all appointments for a client sorted by request time.
+              Used by GET /appointments (CLIENT caller).
+
+GSI
+  NAME        GSI_TherapistAppointments
+  HASH        therapistId
+  RANGE       requestedAt
+  PROJECTION  ALL
+  DESCRIPTION Lists all appointments across all sessions for a therapist.
+              Used by GET /appointments (THERAPIST caller).
+
+GSI
+  NAME        GSI_SessionAppointments
+  HASH        sessionId
+  RANGE       status
+  PROJECTION  ALL
+  DESCRIPTION Groups appointments by session and status. Used for:
+              1. POST /sessions/{id}/start — verify CONFIRMED appointment exists.
+              2. PATCH CONFIRM — find all PENDING to batch-reject.
+              3. DELETE /sessions/{id} — find all appointments to cancel.
+
+GSI
+  NAME        GSI_ClientSessionDedup
+  HASH        clientSession
+  RANGE       status
+  PROJECTION  KEYS_ONLY
+  DESCRIPTION Composite key clientId#sessionId scopes dedup to one client+session.
+              KEYS_ONLY projection minimises RCU cost — only existence matters.
+              Used by POST /appointments to enforce one-per-client-per-session rule.
+
+ACCESS_PATTERNS
+  API         POST /appointments
+  OPERATION   Query (x2 checks) then PutItem + UpdateItem
+  INDEX       GSI_ClientSessionDedup + SessionTable + RelationshipTable
+  KEYS        clientSession = {clientId}#{sessionId}
+  NOTES       1. Query GSI_ClientSessionDedup — return 409 if item found.
+              2. GetItem SessionTable (PK=SESSION#{sessionId}, SK=METADATA) — return 422 if isAvailable=false.
+              3. PutItem appointment with status=PENDING, requestedAt=now.
+              4. UpdateItem RelationshipTable: ADD APPOINTMENT to relationshipTypes (upsert).
+                 No mapping is required — clients may book one-off appointments with any
+                 therapist who has an available session, independent of any mapping.
+
+ACCESS_PATTERNS
+  API         GET /appointments (CLIENT caller)
+  OPERATION   Query
+  INDEX       GSI_ClientAppointments
+  KEYS        clientId = :clientId, requestedAt BETWEEN :from AND :to
+  FILTER      status = :status (optional), sessionId = :sessionId (optional)
+  NOTES       Paginated. Date range on sort key limits partition reads.
+
+ACCESS_PATTERNS
+  API         GET /appointments (THERAPIST caller)
+  OPERATION   Query
+  INDEX       GSI_TherapistAppointments
+  KEYS        therapistId = :therapistId, requestedAt BETWEEN :from AND :to
+  FILTER      status = :status (optional), sessionId = :sessionId (optional)
+  NOTES       Paginated. FilterExpression for optional filters applied post-query.
+
+ACCESS_PATTERNS
+  API         GET /appointments/{appointmentId}
+  OPERATION   GetItem
+  INDEX       AppointmentTable
+  KEYS        appointmentId = :appointmentId
+  NOTES       O(1) direct lookup. Application validates caller is clientId or therapistId.
+
+ACCESS_PATTERNS
+  API         PATCH /appointments/{appointmentId} — CONFIRM
+  OPERATION   TransactWriteItems
+  INDEX       AppointmentTable + SessionTable
+  KEYS        appointmentId = :appointmentId
+  NOTES       ConditionExpression: status=PENDING AND therapistId=:callerId.
+              Atomically: 1. SET status=CONFIRMED on this appointment.
+              2. Query GSI_SessionAppointments for all other PENDING appointments.
+              3. BatchWriteItem to SET status=REJECTED on all others.
+              4. UpdateItem SessionTable METADATA — SET isAvailable=false.
+
+ACCESS_PATTERNS
+  API         PATCH /appointments/{appointmentId} — CANCEL/REJECT/COMPLETE
+  OPERATION   UpdateItem
+  INDEX       AppointmentTable
+  KEYS        appointmentId = :appointmentId
+  NOTES       ConditionExpression validates allowed transition per caller type.
+              UpdateExpression: SET status=:newStatus, updatedAt=:now.
+
+ACCESS_PATTERNS
+  API         DELETE /appointments/{appointmentId}
+  OPERATION   DeleteItem
+  INDEX       AppointmentTable
+  KEYS        appointmentId = :appointmentId
+  NOTES       Hard delete. Caller must be clientId or therapistId on the item.
+              Prefer PATCH to CANCELLED status to preserve audit history.
+
+ACCESS_PATTERNS
+  API         GET /search?keyword=X
+  OPERATION   Query + FilterExpression (multi-table)
+  INDEX       GSI_UserTypeIndex (UserTable) | JournalTable | SessionTable
+  KEYS        Varies per resource type
+  FILTER      contains(:field, :keyword) across relevant text fields
+  NOTES       DynamoDB has no native full-text search. Each resource queried separately.
+              THERAPIST: Query GSI_UserTypeIndex, FilterExpression on name/bio/specialization.
+              JOURNAL_ENTRY: Query JournalTable (clientId=:id, SK BETWEEN first-entry and last-entry),
+                FilterExpression contains on emotion/feeling/notes.
+              SESSION_NOTES: GetItem NOTES#PRIVATE + NOTES#SHARED per accessible session,
+                FilterExpression contains on content.
+              CLIENT: BatchGetItem UserTable using clientIds from RelationshipTable.
+              Should use Amazon OpenSearch Service fed via DynamoDB Streams in Production.
