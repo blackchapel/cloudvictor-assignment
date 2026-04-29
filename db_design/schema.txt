@@ -12,7 +12,7 @@
 #     justified: THREAD#{clientId}#{therapistId} (composite thread identifier),
 #     clientId#emotion (GSI namespace scoping)
 #   - Sort keys only where genuinely needed:
-#       Range queries: MSG#{sentAt}#{messageId}
+#       Range queries: sentAt#messageId (MessageTable messageSk)
 #       Multi-item-type partitions: JOURNAL | entry SK
 #       Meaningful composite key: therapistId as SK in RelationshipTable
 #       Constant SKs (METADATA, PROFILE) have been REMOVED — they add zero value
@@ -45,21 +45,20 @@ TABLE UserTable
 
 DESCRIPTION
   Single table for both CLIENT and THERAPIST accounts. userId is the natural
-  partition keym no prefix needed since this is a single-entity-type table with
-  no ambiguity. No sort key, each user has exactly one item. Therapist-only
+  partition key, no prefix needed since this is a single-entity-type table with
+  no ambiguity. No sort key — each user has exactly one item. Therapist-only
   attributes (licenseNumber, specialization, bio, qualification, yearsOfExperience)
   are absent on CLIENT items, creating naturally sparse indexes.
   GSI_EmailIndex enables O(1) login lookup without a full table scan.
   GSI_UserTypeIndex powers the therapist discovery endpoint by co-locating
-  all THERAPIST items on one GSI partition, sorted by registration date.
+  all THERAPIST items on one GSI partition, sorted by years of experience.
 
 ATTRIBUTES
   userId            String    PK      Unique user ID. Prefix cli_ (client) or thr_ (therapist)
   userType          String    GSI_PK  CLIENT or THERAPIST. GSI_UserTypeIndex partition key
   email             String    GSI_PK  User email. GSI_EmailIndex partition key
-  password          String    ATTR    bcrypt hash. Never included in API responses
+  passwordHash      String    ATTR    bcrypt hash. Never included in API responses
   name              String    ATTR    Full display name
-  phoneNumber       String    ATTR    Optional contact number
   createdAt         String    ATTR    ISO 8601 creation timestamp
   updatedAt         String    ATTR    ISO 8601 last-updated timestamp
   licenseNumber     String    ATTR    THERAPIST only. Professional license number
@@ -75,11 +74,11 @@ GSI
   NAME        GSI_EmailIndex
   HASH        email
   RANGE       userType
-  PROJECTION  INCLUDE userId, userType, email, password, name, phoneNumber, createdAt, updatedAt,
+  PROJECTION  INCLUDE userId, userType, email, passwordHash, name, phoneNumber, createdAt, updatedAt,
                       licenseNumber, specialization, bio, qualification, yearsOfExperience
   DESCRIPTION O(1) login lookup by email without scanning the full table. userType
               as range key allows exact-match filtering in a single Query.
-              INCLUDE projection with password explicitly listed — password is intentionally
+              INCLUDE projection with passwordHash explicitly listed — the hash is intentionally
               present here for login credential verification, not included by accident.
               Explicit projection ensures any future sensitive attribute added to UserTable
               does not automatically appear in this index without a conscious decision.
@@ -107,9 +106,9 @@ ACCESS_PATTERNS
   OPERATION   Query + PutItem
   INDEX       GSI_EmailIndex then UserTable
   KEYS        userId = :userId
-  NOTES       1. Query GSI_EmailIndex (email = :email) to verify email uniqueness.
+  NOTES       1. Query GSI_EmailIndex (email = :email) to verify email uniqueness — 409 if found.
               2. PutItem with ConditionExpression attribute_not_exists(userId).
-              Journal item auto-created in JournalTable in same transaction.
+              Returns ClientResponse (no passwordHash).
 
 ACCESS_PATTERNS
   API         POST /auth/therapists/register
@@ -117,15 +116,20 @@ ACCESS_PATTERNS
   INDEX       GSI_EmailIndex then UserTable
   KEYS        userId = :userId
   NOTES       Same flow as client registration with therapist-specific attributes.
+              yearsOfExperience is mandatory — it is the sort key on GSI_UserTypeIndex.
               ConditionExpression attribute_not_exists(userId) prevents duplicate IDs.
+              Returns TherapistResponse (no passwordHash).
 
 ACCESS_PATTERNS
   API         POST /auth/login
   OPERATION   Query
   INDEX       GSI_EmailIndex
-  KEYS        email = :email, userType = :userType
-  NOTES       Returns user item.
-              Returns 401 on mismatch. Vague response prevents user enumeration.
+  KEYS        email = :email
+  NOTES       Query returns at most one item (one account per email enforced at write time).
+              BCrypt.checkpw() validates password against stored hash.
+              Returns 401 with the same message for unknown email and wrong password —
+              deliberate vagueness prevents user enumeration.
+              Returns AuthResponse: token (JWT HS256), tokenType, expiresIn (3600s), userId, userType.
 
 ACCESS_PATTERNS
   API         GET /clients/{clientId}
@@ -529,8 +533,10 @@ ACCESS_PATTERNS
   API         GET /messages?clientId=X&therapistId=Y
   OPERATION   Query
   INDEX       MessageTable
-  KEYS        threadKey = THREAD#{clientId}#{therapistId}, messageSk begins_with sentAt
-  NOTES       Oldest-first: ScanIndexForward = true. Newest-first: ScanIndexForward = false.
+  KEYS        threadKey = THREAD#{clientId}#{therapistId}
+  NOTES       KeyConditionExpression on threadKey alone — messageSk format (sentAt#messageId)
+              ensures natural chronological ordering without a range condition.
+              Oldest-first: ScanIndexForward = true (default). Newest-first: ScanIndexForward = false.
               Caller validated as clientId or therapistId via JWT before query.
               Paginated with ExclusiveStartKey on messageSk.
 
@@ -786,7 +792,7 @@ ACCESS_PATTERNS
   INDEX       GSI_ClientSessionDedup + SessionTable + RelationshipTable
   KEYS        clientSession = {clientId}#{sessionId}
   NOTES       1. Query GSI_ClientSessionDedup — return 409 if item found.
-              2. GetItem SessionTable (PK=SESSION#{sessionId}, SK=METADATA) — return 422 if isAvailable=false.
+              2. GetItem SessionTable (sessionId = :sessionId) — return 422 if isAvailable=false.
               3. PutItem appointment with status=PENDING, requestedAt=now.
               4. UpdateItem RelationshipTable: ADD APPOINTMENT to relationshipTypes (upsert).
                  No mapping is required — clients may book one-off appointments with any
