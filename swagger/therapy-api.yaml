@@ -1,0 +1,2920 @@
+openapi: 3.0.3
+
+info:
+  title: Therapy Journalling API
+  description: |
+    Backend API for the Therapy Journalling application supporting two user types:
+
+    - **Client**: Maintains an emotions journal, maps to therapists, books sessions,
+      messages therapists, and controls who can access their journal.
+    - **Therapist**: Creates session slots, maintains private and shared session notes,
+      views authorised client journals, and messages clients.
+
+    ## Authentication
+    All endpoints except `/auth/**` require a valid JWT Bearer token obtained from
+    `POST /auth/login`. The token encodes the caller's `userId` and `userType`
+    (`CLIENT` or `THERAPIST`). Every handler must validate that the token's identity
+    matches the resource being accessed.
+
+    ## Relationship Types
+    A client and therapist can be connected in three independent ways:
+    - **Mapping**: a formal, ongoing therapeutic relationship with its own approval
+      flow and journal access control. This is the only gateway to journal access.
+    - **Appointment**: a client books a one-off session slot created by a therapist.
+      Does not require or auto-create a mapping.
+    - **Message**: a direct message exchange between the two parties.
+      Requires any existing relationship (mapping, appointment, or prior message).
+
+    ## Mapping & Journal Access
+    Mapping and journal access are two separate concerns controlled independently:
+
+    - **Mapping** must be `APPROVED` by the non-initiating party before the formal
+      therapeutic relationship is active.
+    - **Journal Access** must be `GRANTED` by the client before a therapist can
+      read the client's journal.
+    - **Both conditions must be met simultaneously** for a therapist to view a journal:
+      `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.
+
+    Either party may initiate a mapping. Journal access can be requested at mapping
+    creation time via the `journalAccess` field, or separately via
+    `PATCH /mappings/{mappingId}/journal-access`.
+
+    ## Session Lifecycle
+    Sessions are created by therapists as bookable slots. The full lifecycle is:
+
+    `SCHEDULED` → `IN_PROGRESS` → `COMPLETED`
+
+    A session can only be started once a client's appointment is `CONFIRMED` and
+    the current server time is on or after `scheduledAt`. Starting a session
+    automatically completes the appointment when the session is ended.
+
+    ## Emotion Journal
+    Clients log emotions using the vocabulary defined in the
+    [Emotion-Feelings reference](https://tomdrummond.com/wp-content/uploads/2019/11/Emotion-Feelings.pdf).
+    Each entry records an emotion category (e.g. Happiness, Fear, Anger),
+    a specific feeling within that category, and an intensity level (STRONG, MEDIUM, LIGHT).
+
+    ## Access Rules (summary)
+    | Resource | CLIENT | THERAPIST |
+    |---|---|---|
+    | Own profile | Full CRUD | Full CRUD |
+    | Other profile | Read any therapist profile | Read connected client profiles |
+    | Connected parties list | `GET /clients/{clientId}/therapists` | `GET /therapists/{therapistId}/clients` |
+    | Journal entries (write) | Own only | ✗ Never |
+    | Journal entries (read) | Own only | Mapped client with `APPROVED` mapping + `GRANTED` access |
+    | Sessions | Read available sessions | Full CRUD on own sessions |
+    | Session private notes | ✗ Never | Own sessions only |
+    | Session shared notes | Read if CONFIRMED/COMPLETED appointment | Own sessions (read/write) |
+    | Messages | Participant only | Participant only |
+    | Appointments | Own (create/cancel) | Own sessions (confirm/reject/cancel/complete) |
+    | Search | Own journal + shared session notes | Private session notes + shared session notes + accessible client journals |
+
+  version: 1.0.0
+
+# servers:
+#   - url: https://api.therapy-app.com/v1
+#     description: Production
+#   - url: https://dev-api.therapy-app.com/v1
+#     description: Development
+
+tags:
+  - name: Auth
+    description: Registration and authentication for clients and therapists
+  - name: Clients
+    description: Client account management
+  - name: Therapists
+    description: Therapist account management
+  - name: Mappings
+    description: |
+      Client-therapist relationship lifecycle:
+      creation → approval/rejection → journal access request → grant/revoke → deletion
+  - name: Journal
+    description: Client emotions journal and individual emotion entries
+  - name: Messages
+    description: Bilateral messaging between a client and a therapist
+  - name: Sessions
+    description: Therapy session slots created by therapists
+  - name: Session Notes
+    description: Private (therapist-only) and shared (client-visible) notes within a session
+  - name: Appointments
+    description: Client appointment requests against available session slots
+  - name: Search
+    description: Universal keyword search scoped to the caller's accessible resources
+
+# All paths require auth unless overridden with security: []
+security:
+  - BearerAuth: []
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+components:
+  # ----------------------------------------------------------
+  # Security Schemes
+  # ----------------------------------------------------------
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT obtained from `/auth/clients/login` or `/auth/therapists/login`.
+        Include as `Authorization: Bearer <token>` on every protected request.
+
+  # ----------------------------------------------------------
+  # Schemas
+  # ----------------------------------------------------------
+  schemas:
+    # ---- Enums ------------------------------------------------
+
+    UserType:
+      type: string
+      enum: [CLIENT, THERAPIST]
+      description: Discriminates between the two account types in the system.
+
+    MappingStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+      description: |
+        Lifecycle of the mapping request itself.
+        - `PENDING`  – request sent, awaiting the other party's action.
+        - `APPROVED` – both parties are linked for therapy.
+        - `REJECTED` – the non-initiating party declined the request.
+
+    JournalAccessStatus:
+      type: string
+      enum: [NONE, REQUESTED, GRANTED, REVOKED]
+      description: |
+        Controls whether a therapist can read a client's journal.
+        - `NONE`      – default; no access and no outstanding request.
+        - `REQUESTED` – therapist has asked for access; awaiting client decision.
+        - `GRANTED`   – client approved the request; therapist can read the journal.
+        - `REVOKED`   – client previously granted access but has since revoked it.
+        Journal access is automatically set to `REVOKED` when a mapping is deleted.
+
+    AppointmentStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, CANCELLED, COMPLETED]
+      description: |
+        Lifecycle of a client's appointment request.
+        - `PENDING`   – client has requested; awaiting therapist confirmation.
+        - `CONFIRMED` – therapist has confirmed the appointment.
+        - `CANCELLED` – cancelled by either party.
+        - `COMPLETED` – session has taken place.
+
+    EmotionIntensity:
+      type: string
+      enum: [STRONG, MEDIUM, LIGHT]
+      description: |
+        Self-reported intensity of the emotion, following the Emotion-Feelings vocabulary reference.
+        - `STRONG` – highest intensity feelings (e.g. Ecstatic, Terrified, Enraged)
+        - `MEDIUM` – moderate intensity feelings (e.g. Cheerful, Nervous, Irritated)
+        - `LIGHT`  – mild intensity feelings (e.g. Contented, Anxious, Bugged)
+
+    SessionStatus:
+      type: string
+      enum: [SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED]
+      description: |
+        Lifecycle of a session slot.
+        - `SCHEDULED`   - created by therapist, not yet started.
+        - `IN_PROGRESS` - therapist has started the session.
+        - `COMPLETED`   - therapist has ended the session.
+        - `CANCELLED`   - session was deleted or cancelled.
+
+    SearchResourceType:
+      type: string
+      enum: [JOURNAL_ENTRY, SESSION_NOTES, CLIENT, THERAPIST]
+      description: >
+        Used as an optional `type` filter on `GET /search` to narrow results
+        to a single resource category.
+
+    # ---- Auth -------------------------------------------------
+
+    ClientRegistrationRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane.doe@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Minimum 8 characters; must contain at least one digit and one letter.
+          example: "SecurePass1!"
+        name:
+          type: string
+          example: Jane Doe
+
+    TherapistRegistrationRequest:
+      type: object
+      required:
+        [
+          email,
+          password,
+          name,
+          licenseNumber,
+          specialization,
+          bio,
+          qualification,
+          yearsOfExperience,
+        ]
+      properties:
+        email:
+          type: string
+          format: email
+          example: john.smith@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Minimum 8 characters; must contain at least one digit and one letter.
+          example: "SecurePass1!"
+        name:
+          type: string
+          example: John Smith
+        licenseNumber:
+          type: string
+          description: Verified professional therapy license number.
+          example: LIC-2024-12345
+        specialization:
+          type: string
+          example: Cognitive Behavioural Therapy
+        bio:
+          type: string
+          example: Experienced therapist focusing on anxiety and depression.
+        qualification:
+          type: string
+          example: MSc Psychology
+        yearsOfExperience:
+          type: number
+          example: 10
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          example: "SecurePass1!"
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Signed JWT bearer token.
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Seconds until the token expires.
+          example: 3600
+        userId:
+          type: string
+          example: cli_abc123
+        userType:
+          $ref: "#/components/schemas/UserType"
+
+    # ---- Client -----------------------------------------------
+
+    Client:
+      type: object
+      properties:
+        clientId:
+          type: string
+          readOnly: true
+          example: cli_abc123
+        email:
+          type: string
+          format: email
+          example: jane.doe@example.com
+        name:
+          type: string
+          example: Jane Doe
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    ClientUpdateRequest:
+      type: object
+      description: Fields that a client may update on their own profile. Email and password changes are out of scope.
+      properties:
+        name:
+          type: string
+          example: Jane Doe
+
+    # ---- Therapist --------------------------------------------
+
+    Therapist:
+      type: object
+      properties:
+        therapistId:
+          type: string
+          readOnly: true
+          example: thr_xyz789
+        email:
+          type: string
+          format: email
+          example: john.smith@example.com
+        name:
+          type: string
+          example: John Smith
+        licenseNumber:
+          type: string
+          example: LIC-2024-12345
+        specialization:
+          type: string
+          example: Cognitive Behavioural Therapy
+        bio:
+          type: string
+          example: Experienced therapist focusing on anxiety and depression.
+        qualification:
+          type: string
+          example: MSc Psychology
+        yearsOfExperience:
+          type: number
+          example: 10
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    TherapistUpdateRequest:
+      type: object
+      description: Fields that a therapist may update on their own profile. Email and password changes are out of scope.
+      properties:
+        name:
+          type: string
+        specialization:
+          type: string
+        bio:
+          type: string
+        qualification:
+          type: string
+          example: MSc Psychology
+        yearsOfExperience:
+          type: number
+          example: 10
+
+    # ---- Mapping ----------------------------------------------
+
+    Mapping:
+      type: object
+      properties:
+        mappingId:
+          type: string
+          readOnly: true
+          example: map_def456
+        clientId:
+          type: string
+          example: cli_abc123
+        therapistId:
+          type: string
+          example: thr_xyz789
+        mappingStatus:
+          $ref: "#/components/schemas/MappingStatus"
+        journalAccessStatus:
+          $ref: "#/components/schemas/JournalAccessStatus"
+        initiatedBy:
+          $ref: "#/components/schemas/UserType"
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    CreateMappingRequest:
+      type: object
+      required: [clientId, therapistId]
+      description: |
+        Either party may initiate a mapping. The initiating party is derived from the JWT.
+
+        - **Client initiating**: must supply their own `clientId`; freely picks any `therapistId`.
+        - **Therapist initiating**: must supply their own `therapistId`; supplies the target `clientId`.
+
+        **`journalAccess` field behaviour (optional, default: false)**:
+
+        | Initiating party | journalAccess: true | journalAccess: false |
+        |---|---|---|
+        | CLIENT | mapping: PENDING, journalAccessStatus: GRANTED | mapping: PENDING, journalAccessStatus: NONE |
+        | THERAPIST | mapping: PENDING, journalAccessStatus: REQUESTED | mapping: PENDING, journalAccessStatus: NONE |
+
+        The journal is not viewable until both `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.
+      properties:
+        clientId:
+          type: string
+          example: cli_abc123
+        therapistId:
+          type: string
+          example: thr_xyz789
+        journalAccess:
+          type: boolean
+          default: false
+          description: |
+            Optional. Behaviour depends on who initiates:
+            - **Therapist**: sets `journalAccessStatus` to `REQUESTED` — client must still approve.
+            - **Client**: sets `journalAccessStatus` to `GRANTED` immediately — therapist must still approve the mapping itself before journal becomes viewable.
+
+    UpdateMappingStatusRequest:
+      type: object
+      required: [mappingStatus]
+      description: |
+        Drives the mapping approval state machine.
+        Only the **non-initiating party** may call this endpoint.
+
+        | Caller | From → To |
+        |---|---|
+        | Non-initiating party | `PENDING → APPROVED` |
+        | Non-initiating party | `PENDING → REJECTED` |
+
+        Any other transition or caller returns **422** or **403** respectively.
+      properties:
+        mappingStatus:
+          $ref: "#/components/schemas/MappingStatus"
+
+    UpdateJournalAccessRequest:
+      type: object
+      required: [journalAccessStatus]
+      description: |
+        Drives the journal access state machine on an existing mapping.
+
+        | Caller | Mapping Status | From → To | Side Effect |
+        |---|---|---|---|
+        | Therapist | APPROVED | `NONE → REQUESTED` | None |
+        | Therapist | APPROVED | `REVOKED → REQUESTED` | None |
+        | Client | PENDING or APPROVED | `REQUESTED → GRANTED` | If mapping is PENDING → auto-approved |
+        | Client | PENDING or APPROVED | `NONE → GRANTED` | If mapping is PENDING → auto-approved |
+        | Client | PENDING or APPROVED | `REQUESTED → REVOKED` | None |
+        | Client | PENDING or APPROVED | `GRANTED → REVOKED` | None |
+
+        **Auto-approve rule**: When a client sets `journalAccessStatus → GRANTED` and the mapping
+        is still `PENDING`, the server automatically transitions `mappingStatus → APPROVED`
+        in the same operation. This is because granting journal access implies consent to
+        the formal relationship.
+
+        **Journal viewability rule**: Journal is only readable when BOTH conditions are met:
+        `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.
+
+        Returns **403** if the caller attempts a transition they are not permitted.
+        Returns **422** for invalid transitions.
+        Therapist transitions require mapping to be `APPROVED` — returns **422** otherwise.
+      properties:
+        journalAccessStatus:
+          $ref: "#/components/schemas/JournalAccessStatus"
+
+    RelationshipType:
+      type: string
+      enum: [MAPPING, APPOINTMENT, MESSAGE]
+      description: The type of relationship connecting a client and therapist.
+
+    ClientTherapistRelationship:
+      type: object
+      description: >
+        A therapist connected to a client in any way, with full relationship context
+        needed to drive UI actions.
+      properties:
+        therapist:
+          $ref: "#/components/schemas/Therapist"
+        relationshipTypes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RelationshipType"
+          description: >
+            All relationship types currently connecting this client and therapist.
+            A therapist appears in the list if at least one relationship type exists.
+          example: [MAPPING, MESSAGE]
+        mapping:
+          allOf:
+            - $ref: "#/components/schemas/Mapping"
+          nullable: true
+          description: >
+            Present if a formal mapping exists (any mappingStatus).
+            Null if the therapist appears only via APPOINTMENT or MESSAGE.
+
+    TherapistClientRelationship:
+      type: object
+      description: >
+        A client connected to a therapist in any way, with full relationship context
+        needed to drive UI actions.
+      properties:
+        client:
+          $ref: "#/components/schemas/Client"
+        relationshipTypes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RelationshipType"
+          description: >
+            All relationship types currently connecting this therapist and client.
+            A client appears in the list if at least one relationship type exists.
+          example: [APPOINTMENT]
+        mapping:
+          allOf:
+            - $ref: "#/components/schemas/Mapping"
+          nullable: true
+          description: >
+            Present if a formal mapping exists (any mappingStatus).
+            Null if the client appears only via APPOINTMENT or MESSAGE.
+
+    PaginatedClientTherapistRelationshipList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientTherapistRelationship"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PaginatedTherapistClientRelationshipList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TherapistClientRelationship"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    # ---- Journal ----------------------------------------------
+
+    Journal:
+      type: object
+      description: Metadata for a client's single emotions journal. Created automatically on client registration.
+      properties:
+        journalId:
+          type: string
+          readOnly: true
+          example: jnl_ghi321
+        clientId:
+          type: string
+          example: cli_abc123
+        totalEntries:
+          type: integer
+          readOnly: true
+          description: Total number of emotion entries in this journal.
+          example: 42
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    JournalEntry:
+      type: object
+      properties:
+        entryId:
+          type: string
+          readOnly: true
+          example: ent_jkl654
+        clientId:
+          type: string
+          readOnly: true
+          example: cli_abc123
+        emotion:
+          type: string
+          description: |
+            Primary emotion category from the Emotion-Feelings vocabulary.
+            Must be one of: Happiness, Caring, Depression, Inadequate, Fear,
+            Confusion, Hurt, Anger, Loneliness, Remorse.
+          example: Fear
+        feeling:
+          type: string
+          description: |
+            Specific feeling within the emotion category, at the given intensity level.
+            Examples by category and intensity:
+            - Happiness/STRONG: Ecstatic, Elated, Euphoric, Thrilled
+            - Happiness/MEDIUM: Cheerful, Gleeful, Jovial, Merry
+            - Happiness/LIGHT: Contented, Glad, Pleased, Serene
+            - Fear/STRONG: Horrified, Panicky, Petrified, Terrified
+            - Fear/MEDIUM: Afraid, Alarmed, Fearful, Nervous, Scared
+            - Fear/LIGHT: Anxious, Cautious, Timid, Uneasy, Worried
+            - Anger/STRONG: Enraged, Furious, Incensed, Outraged, Seething
+            - Anger/MEDIUM: Aggravated, Annoyed, Hostile, Irate, Irritated
+            - Anger/LIGHT: Bugged, Dismayed, Impatient, Irked, Resentful
+
+            Refer to the full [Emotion-Feelings vocabulary](https://tomdrummond.com/wp-content/uploads/2019/11/Emotion-Feelings.pdf) for all categories and feelings.
+          example: Petrified
+        intensity:
+          $ref: "#/components/schemas/EmotionIntensity"
+        notes:
+          type: string
+          description: Optional free-text context from the client.
+          example: Had a tough presentation at work today.
+        emotionTimestamp:
+          type: string
+          format: date-time
+          description: The point in time when the emotion was actually felt (may differ from entry creation time).
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    CreateJournalEntryRequest:
+      type: object
+      required: [emotion, feeling, intensity, emotionTimestamp]
+      properties:
+        emotion:
+          type: string
+          description: |
+            Primary emotion category from the Emotion-Feelings vocabulary.
+            Must be one of: Happiness, Caring, Depression, Inadequate, Fear,
+            Confusion, Hurt, Anger, Loneliness, Remorse.
+          example: Fear
+        feeling:
+          type: string
+          description: |
+            Specific feeling within the chosen emotion category at the given intensity.
+            Refer to the Emotion-Feelings vocabulary reference for the full list.
+          example: Petrified
+        intensity:
+          $ref: "#/components/schemas/EmotionIntensity"
+        notes:
+          type: string
+          example: Had a tough presentation at work today.
+        emotionTimestamp:
+          type: string
+          format: date-time
+
+    UpdateJournalEntryRequest:
+      type: object
+      description: All fields are optional; only supplied fields are updated.
+      properties:
+        emotion:
+          type: string
+        feeling:
+          type: string
+        intensity:
+          $ref: "#/components/schemas/EmotionIntensity"
+        notes:
+          type: string
+        emotionTimestamp:
+          type: string
+          format: date-time
+
+    # ---- Message ----------------------------------------------
+
+    Message:
+      type: object
+      properties:
+        messageId:
+          type: string
+          readOnly: true
+          example: msg_mno987
+        clientId:
+          type: string
+          example: cli_abc123
+        therapistId:
+          type: string
+          example: thr_xyz789
+        senderType:
+          $ref: "#/components/schemas/UserType"
+          description: Whether the sender is the CLIENT or the THERAPIST in this conversation.
+        senderId:
+          type: string
+          example: cli_abc123
+        content:
+          type: string
+          example: I would like to discuss my progress before next session.
+        sentAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    SendMessageRequest:
+      type: object
+      required: [clientId, therapistId, content]
+      description: >
+        The authenticated user must be either `clientId` or `therapistId`.
+        A mapping must exist between the two parties (any `mappingStatus`).
+      properties:
+        clientId:
+          type: string
+          example: cli_abc123
+        therapistId:
+          type: string
+          example: thr_xyz789
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: I would like to discuss my progress before next session.
+
+    # ---- Session ----------------------------------------------
+
+    Session:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          readOnly: true
+          example: ses_pqr111
+        therapistId:
+          type: string
+          readOnly: true
+          example: thr_xyz789
+        title:
+          type: string
+          example: Weekly Check-In
+        description:
+          type: string
+          example: General well-being and progress review.
+        scheduledAt:
+          type: string
+          format: date-time
+        durationMinutes:
+          type: integer
+          minimum: 15
+          example: 60
+        isAvailable:
+          type: boolean
+          description: Whether this slot is open for new appointment requests.
+          example: true
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+          readOnly: true
+          description: Current lifecycle status of the session. Defaults to SCHEDULED on creation.
+        startedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: Timestamp when the therapist started the session. Null until started.
+        endedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: Timestamp when the therapist ended the session. Null until ended.
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    CreateSessionRequest:
+      type: object
+      required: [title, scheduledAt, durationMinutes]
+      properties:
+        title:
+          type: string
+          example: Weekly Check-In
+        description:
+          type: string
+          example: General well-being and progress review.
+        scheduledAt:
+          type: string
+          format: date-time
+        durationMinutes:
+          type: integer
+          minimum: 15
+          example: 60
+
+    UpdateSessionRequest:
+      type: object
+      description: All fields are optional; only supplied fields are updated.
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        durationMinutes:
+          type: integer
+          minimum: 15
+        isAvailable:
+          type: boolean
+
+    # ---- Session Notes ----------------------------------------
+
+    PrivateNotes:
+      type: object
+      description: >
+        Therapist-only notes attached to a session. Never exposed to clients.
+      properties:
+        sessionId:
+          type: string
+          readOnly: true
+          example: ses_pqr111
+        content:
+          type: string
+          example: Client is showing improvement in emotional regulation techniques.
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    UpdatePrivateNotesRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          example: Client is showing improvement in emotional regulation techniques.
+
+    SharedNotes:
+      type: object
+      description: >
+        Notes shared between the therapist and the client booked for this session.
+        Used for assignments, action items, and session summaries.
+      properties:
+        sessionId:
+          type: string
+          readOnly: true
+          example: ses_pqr111
+        content:
+          type: string
+          example: "Assignment: Journal your emotions at least once per day this week."
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    UpdateSharedNotesRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          example: "Assignment: Journal your emotions at least once per day this week."
+
+    # ---- Appointment ------------------------------------------
+
+    Appointment:
+      type: object
+      properties:
+        appointmentId:
+          type: string
+          readOnly: true
+          example: apt_stu222
+        sessionId:
+          type: string
+          example: ses_pqr111
+        clientId:
+          type: string
+          example: cli_abc123
+        therapistId:
+          type: string
+          readOnly: true
+          description: Derived from the session; stored for query convenience.
+          example: thr_xyz789
+        status:
+          $ref: "#/components/schemas/AppointmentStatus"
+        requestedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    CreateAppointmentRequest:
+      type: object
+      required: [sessionId]
+      description: >
+        Only clients can create appointments. The session must have `isAvailable: true`.
+        An APPROVED mapping between the client and the session's therapist must exist.
+        Duplicate appointments for the same client/session are rejected with 409.
+      properties:
+        sessionId:
+          type: string
+          example: ses_pqr111
+
+    PatchAppointmentRequest:
+      type: object
+      required: [status]
+      description: |
+        Allowed status transitions:
+
+        | Caller | From → To |
+        |---|---|
+        | Therapist | `PENDING → CONFIRMED` |
+        | Therapist | `PENDING → CANCELLED` |
+        | Therapist | `CONFIRMED → CANCELLED` |
+        | Therapist | `CONFIRMED → COMPLETED` |
+        | Client | `PENDING → CANCELLED` |
+        | Client | `CONFIRMED → CANCELLED` |
+
+        Any other transition returns **422 Unprocessable Entity**.
+      properties:
+        status:
+          $ref: "#/components/schemas/AppointmentStatus"
+
+    # ---- Search -----------------------------------------------
+
+    SessionNoteSearchResult:
+      type: object
+      description: A search hit within session notes, with a contextual excerpt.
+      properties:
+        sessionId:
+          type: string
+          example: ses_pqr111
+        noteType:
+          type: string
+          enum: [PRIVATE, SHARED]
+          description: Whether the match was in private or shared notes.
+        snippet:
+          type: string
+          description: Short excerpt surrounding the matched keyword.
+          example: "...client reported feeling **anxious** before the session..."
+
+    SearchResult:
+      type: object
+      description: >
+        Unified search result. Fields are always present but may be empty arrays
+        if there are no matches or the caller has no access to that resource type.
+        This prevents information leakage about the existence of resources.
+      properties:
+        keyword:
+          type: string
+          example: anxiety
+        journalEntries:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntry"
+          description: >
+            Matching journal entries.
+            Clients see only their own; therapists see entries from clients with GRANTED access.
+        sessionNotes:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionNoteSearchResult"
+          description: >
+            Matching session notes.
+            Therapists see private and shared notes from their own sessions.
+            Clients see shared notes from sessions they have a CONFIRMED appointment for.
+        clients:
+          type: array
+          items:
+            $ref: "#/components/schemas/Client"
+          description: >
+            Matching client profiles.
+            Only returned for therapists; scoped to mapped clients.
+        therapists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Therapist"
+          description: >
+            Matching therapist profiles.
+            Only returned for clients; searches across all therapists on the platform.
+
+    # ---- Pagination wrappers ----------------------------------
+
+    PaginatedClientList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Client"
+        total:
+          type: integer
+          example: 5
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 20
+
+    PaginatedTherapistList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Therapist"
+        total:
+          type: integer
+          example: 10
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 20
+
+    PaginatedMappingList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Mapping"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PaginatedJournalEntryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntry"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PaginatedMessageList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PaginatedSessionList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PaginatedAppointmentList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Appointment"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    # ---- Error ------------------------------------------------
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      description: Standard error envelope returned for all 4xx and 5xx responses.
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+          example: RESOURCE_NOT_FOUND
+        message:
+          type: string
+          description: Human-readable explanation.
+          example: The requested resource was not found.
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured context (e.g. field-level validation errors).
+          example:
+            field: email
+            reason: must be a valid email address
+
+  # ----------------------------------------------------------
+  # Reusable Responses
+  # ----------------------------------------------------------
+  responses:
+    BadRequest:
+      description: "400 – Bad Request: missing or invalid request parameters."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: BAD_REQUEST
+            message: "Required field 'email' is missing or has an invalid format."
+            details:
+              field: email
+              reason: must be a valid email address
+
+    Unauthorized:
+      description: "401 – Unauthorized: missing, expired, or invalid JWT token."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: UNAUTHORIZED
+            message: "Authentication token is missing or has expired."
+
+    Forbidden:
+      description: "403 – Forbidden: caller is authenticated but not permitted to perform this action."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: FORBIDDEN
+            message: "You do not have permission to access this resource."
+
+    NotFound:
+      description: "404 – Not Found: the requested resource does not exist."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: NOT_FOUND
+            message: "The requested resource was not found."
+
+    Conflict:
+      description: "409 – Conflict: a duplicate resource or invalid state already exists."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: CONFLICT
+            message: "A mapping between this client and therapist already exists."
+
+    UnprocessableEntity:
+      description: "422 – Unprocessable Entity: request is syntactically valid but semantically incorrect (e.g. invalid state transition)."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: UNPROCESSABLE_ENTITY
+            message: "Invalid status transition: only the non-initiating party may approve a mapping."
+
+    InternalServerError:
+      description: "500 – Internal Server Error: an unexpected server-side error occurred."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INTERNAL_SERVER_ERROR
+            message: "An unexpected error occurred. Please try again later."
+
+  # ----------------------------------------------------------
+  # Reusable Parameters
+  # ----------------------------------------------------------
+  parameters:
+    ClientIdPath:
+      name: clientId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the client.
+
+    TherapistIdPath:
+      name: therapistId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the therapist.
+
+    MappingIdPath:
+      name: mappingId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the client-therapist mapping.
+
+    SessionIdPath:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the session.
+
+    AppointmentIdPath:
+      name: appointmentId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the appointment.
+
+    EntryIdPath:
+      name: entryId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the journal entry.
+
+    MessageIdPath:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the message.
+
+    PageQuery:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number for pagination (1-indexed).
+
+    PageSizeQuery:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Number of items per page.
+
+# ============================================================
+# PATHS
+# ============================================================
+paths:
+  # ============================================================
+  # AUTH
+  # ============================================================
+
+  /auth/clients/register:
+    post:
+      tags: [Auth]
+      summary: Register a new client account
+      description: >
+        Creates a client account and returns the new client profile.
+        Returns 409 if the email is already registered (for any user type).
+        Password must meet minimum complexity requirements.
+      security: []
+      operationId: registerClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientRegistrationRequest"
+      responses:
+        "201":
+          description: Client registered successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /auth/therapists/register:
+    post:
+      tags: [Auth]
+      summary: Register a new therapist account
+      description: >
+        Creates a therapist account and returns the new therapist profile.
+        Returns 409 if the email is already registered (for any user type).
+      security: []
+      operationId: registerTherapist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TherapistRegistrationRequest"
+      responses:
+        "201":
+          description: Therapist registered successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Therapist"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate a client / therapist and return a JWT
+      description: >
+        Validates email and password for an account.
+        Returns a signed JWT valid for the configured expiry window.
+        Returns 401 for invalid credentials (deliberately vague to prevent user enumeration).
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # CLIENTS
+  # ============================================================
+
+  /clients/{clientId}:
+    get:
+      tags: [Clients]
+      summary: Get a client profile
+      description: |
+        **Client**: May retrieve their own profile only. Attempting to read another
+          client's profile returns 403.
+
+        **Therapist**: May retrieve a client's profile only if any kind of relation
+          exists between them.  
+
+        Note: the response never includes password hashes or other sensitive auth fields.
+      operationId: getClient
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+      responses:
+        "200":
+          description: Client profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Clients]
+      summary: Update a client profile
+      description: >
+        Only the client themselves may update their own profile.
+        Attempting to update another client's profile returns 403.
+      operationId: updateClient
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientUpdateRequest"
+      responses:
+        "200":
+          description: Updated client profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Clients]
+      summary: Delete a client account
+      description: >
+        Only the client themselves may delete their own account.
+        This cascades: all journal entries, mappings, appointments, and message history
+        belonging to the client are permanently removed.
+      operationId: deleteClient
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+      responses:
+        "204":
+          description: Client account deleted successfully.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /clients/{clientId}/therapists:
+    get:
+      tags: [Clients]
+      summary: List therapists connected to a client
+      description: |
+        **Client only (own account).** Returns all therapists connected to this client
+        in any way - mapping, appointment, or message, along with relationship context
+        needed to drive the following actions:
+
+        - Remove a therapist mapped to account → DELETE /mappings/{mappingId}
+        - Remove journal access but keep mapping → PATCH /mappings/{mappingId}/journal-access
+        - Send a message / view history → POST /messages or GET /messages
+
+        A therapist appears in this list if at least one relationship type exists.
+        The `mapping` field is null if the connection is only via appointment or message.
+      operationId: listClientTherapists
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by therapist's name.
+        - name: relationshipType
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RelationshipType"
+          description: Filter by a specific relationship type.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of therapists connected to this client.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedClientTherapistRelationshipList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # THERAPISTS
+  # ============================================================
+
+  /therapists:
+    get:
+      tags: [Therapists]
+      summary: List therapists on the platform
+      description: >
+        **Client only.** Returns a paginated, searchable list of all registered therapists
+        so that clients can browse and select a therapist to map.
+        Therapists cannot call this endpoint, they retrieve their clients via `GET /clients`.
+      operationId: listTherapists
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Full-text search across name, specialization, bio and qualification.
+            When combined with field-specific filters, results must satisfy both.
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by therapist name.
+        - name: specialization
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by specialization.
+        - name: qualification
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by qualification.
+        - name: yearsOfExperienceMin
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Filter therapists with years of experience greater than or equal to this value.
+        - name: yearsOfExperienceMax
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Filter therapists with years of experience less than or equal to this value.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of therapists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedTherapistList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /therapists/{therapistId}:
+    get:
+      tags: [Therapists]
+      summary: Get a therapist profile
+      description: >
+        - **Client**: May view any therapist's public profile.
+        - **Therapist**: May view their own profile only.
+          Attempting to read another therapist's profile returns 403.
+      operationId: getTherapist
+      parameters:
+        - $ref: "#/components/parameters/TherapistIdPath"
+      responses:
+        "200":
+          description: Therapist profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Therapist"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Therapists]
+      summary: Update a therapist profile
+      description: Only the therapist themselves may update their own profile.
+      operationId: updateTherapist
+      parameters:
+        - $ref: "#/components/parameters/TherapistIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TherapistUpdateRequest"
+      responses:
+        "200":
+          description: Updated therapist profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Therapist"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Therapists]
+      summary: Delete a therapist account
+      description: >
+        Only the therapist themselves may delete their own account.
+        This cascades: all sessions, notes, and mappings owned by the therapist are removed.
+        Clients who had appointments with this therapist receive a CANCELLED status update.
+      operationId: deleteTherapist
+      parameters:
+        - $ref: "#/components/parameters/TherapistIdPath"
+      responses:
+        "204":
+          description: Therapist account deleted successfully.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /therapists/{therapistId}/clients:
+    get:
+      tags: [Therapists]
+      summary: List clients connected to a therapist
+      description: |
+        **Therapist only (own account).** Returns all clients connected to this therapist
+        in any way - mapping, appointment, or message, along with relationship context
+        needed to drive the following actions:
+
+        - Request a new mapping with a client → POST /mappings
+        - Request journal access for a mapped client → PATCH /mappings/{mappingId}/journal-access
+        - Send a message / view history → POST /messages or GET /messages
+        - Remove a client mapping → DELETE /mappings/{mappingId}
+
+        A client appears in this list if at least one relationship type exists.
+        The `mapping` field is null if the connection is only via appointment or message,
+        and the therapist can initiate a formal mapping from this view.
+      operationId: listTherapistClients
+      parameters:
+        - $ref: "#/components/parameters/TherapistIdPath"
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by client's name.
+        - name: relationshipType
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RelationshipType"
+          description: Filter by a specific relationship type.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of clients connected to this therapist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedTherapistClientRelationshipList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # MAPPINGS
+  # ============================================================
+
+  /mappings:
+    post:
+      tags: [Mappings]
+      summary: Create a new client-therapist mapping request
+      description: |
+        Initiates a mapping between a client and therapist. The initiating party is
+        derived from the JWT — the server rejects any request where the caller's identity
+        does not match the corresponding id field in the body.
+
+        **Security note**: clientId/therapistId in the body are validated against the
+        caller's JWT — preventing impersonation attacks.
+
+        **`journalAccess` field behaviour (optional, default: false)**:
+
+        | Initiating party | journalAccess: true | journalAccess: false |
+        |---|---|---|
+        | CLIENT | mapping: PENDING, journalAccessStatus: GRANTED | mapping: PENDING, journalAccessStatus: NONE |
+        | THERAPIST | mapping: PENDING, journalAccessStatus: REQUESTED | mapping: PENDING, journalAccessStatus: NONE |
+
+        **Flow when CLIENT initiates with journalAccess: true (Flow 2)**:
+        - Mapping created: PENDING, journalAccessStatus: GRANTED
+        - Therapist must approve mapping via `PATCH /mappings/{mappingId}/mapping-status → APPROVED`
+        - Once therapist approves, both conditions are met → journal becomes viewable immediately.
+        - Therapist cannot view journal until they approve the mapping.
+
+        **Flow when THERAPIST initiates with journalAccess: true (Flow 5)**:
+        - Mapping created: PENDING, journalAccessStatus: REQUESTED
+        - Client has two options:
+          - Approve mapping only → `PATCH /mappings/{mappingId}/mapping-status → APPROVED`
+            Mapping approved but journalAccess still REQUESTED → journal not viewable yet.
+          - Approve journal access → `PATCH /mappings/{mappingId}/journal-access → GRANTED`
+            Mapping is auto-approved in the same operation → journal becomes viewable immediately.
+
+        Journal is never viewable until both `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMappingRequest"
+      responses:
+        "201":
+          description: Mapping request created in PENDING state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mapping"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "404 – The target client or therapist ID does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "409 – An active or pending mapping between this client and therapist already exists."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      tags: [Mappings]
+      summary: List mappings for the authenticated user
+      description: >
+        Returns all mappings for the caller. Callers only see their own mappings:
+        - **Client**: sees all therapists linked/pending/rejected against their account.
+        - **Therapist**: sees all clients linked/pending/rejected against their account.
+        Callers cannot retrieve mappings belonging to other users.
+      operationId: listMappings
+      parameters:
+        - name: mappingStatus
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/MappingStatus"
+          description: Filter by mapping approval status.
+        - name: journalAccessStatus
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/JournalAccessStatus"
+          description: Filter by journal access status.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of the caller's mappings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedMappingList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /mappings/{mappingId}:
+    get:
+      tags: [Mappings]
+      summary: Get a mapping by ID
+      description: >
+        Only the client or therapist who are parties to this mapping may view it.
+        Attempting to read a mapping you are not part of returns 403 (not 404)
+        to avoid leaking mapping existence to unrelated users.
+      operationId: getMapping
+      parameters:
+        - $ref: "#/components/parameters/MappingIdPath"
+      responses:
+        "200":
+          description: Mapping details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mapping"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Mappings]
+      summary: Delete a mapping
+      description: >
+        Removes the client-therapist relationship entirely.
+        `journalAccessStatus` is automatically set to `REVOKED` before deletion.
+        Either party in the mapping may initiate deletion.
+        Attempting to delete a mapping you are not part of returns 403.
+      operationId: deleteMapping
+      parameters:
+        - $ref: "#/components/parameters/MappingIdPath"
+      responses:
+        "204":
+          description: Mapping deleted successfully.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /mappings/{mappingId}/mapping-status:
+    patch:
+      tags: [Mappings]
+      summary: Approve or reject a mapping request
+      description: |
+        Only the **non-initiating party** may call this endpoint.
+        Used to approve or reject a PENDING mapping request.
+
+        | Caller | From → To |
+        |---|---|
+        | Non-initiating party | `PENDING → APPROVED` |
+        | Non-initiating party | `PENDING → REJECTED` |
+
+        Returns **403** if the caller is the initiating party.
+        Returns **422** for any invalid transition.
+      operationId: updateMappingStatus
+      parameters:
+        - $ref: "#/components/parameters/MappingIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMappingStatusRequest"
+      responses:
+        "200":
+          description: Mapping status updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mapping"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /mappings/{mappingId}/journal-access:
+    patch:
+      tags: [Mappings]
+      summary: Request, approve, reject or revoke journal access
+      description: |
+        Drives the journal access state machine on an existing mapping.
+        For therapists requesting journal access when no mapping exists,
+        use `POST /mappings` with `journalAccess: true` which auto-creates the mapping.
+
+        | Caller | Mapping Status | From → To | Side Effect |
+        |---|---|---|---|
+        | Therapist | APPROVED | `NONE → REQUESTED` | None |
+        | Therapist | APPROVED | `REVOKED → REQUESTED` | None |
+        | Client | PENDING or APPROVED | `REQUESTED → GRANTED` | If mapping PENDING → mapping auto-approved |
+        | Client | PENDING or APPROVED | `REQUESTED → REVOKED` | None |
+        | Client | PENDING or APPROVED | `GRANTED → REVOKED` | None |
+
+        **Mapping auto-approve rule**: Applies ONLY when a client sets
+        `journalAccessStatus → GRANTED` in response to a therapist's direct request for journal access without prior `APPROVED` mapping.
+        If mapping is still `PENDING`, the server automatically transitions
+        `mappingStatus → APPROVED` in the same operation.
+        This means the client can approve both mapping and journal access in a single call.
+
+        **Client-initiated journal access**: If a client granted journal access at mapping
+        creation time, `journalAccessStatus` is already `GRANTED` and mapping is `PENDING`.
+        The therapist must approve the mapping via `PATCH /mappings/{mappingId}/mapping-status`.
+        Once approved, the journal becomes viewable immediately since access was already granted.
+
+        **Therapist restriction**: Therapist transitions require `mappingStatus = APPROVED`
+        — use `POST /mappings` with `journalAccess: true` instead if no mapping exists yet.
+        Returns **422** if mapping is not `APPROVED`.
+
+        **Journal viewability rule**: Journal is only readable when BOTH conditions are met:
+        `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.
+
+        Returns **403** if the caller attempts a transition they are not permitted.
+        Returns **422** for invalid transitions.
+      operationId: updateJournalAccess
+      parameters:
+        - $ref: "#/components/parameters/MappingIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateJournalAccessRequest"
+      responses:
+        "200":
+          description: Journal access updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mapping"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # JOURNAL
+  # ============================================================
+
+  /clients/{clientId}/journal:
+    get:
+      tags: [Journal]
+      summary: Get a client's journal metadata
+      description: >
+        Returns journal metadata (not entries). The journal is created automatically
+        on client registration.
+
+        **Access control**:
+        - **Client**: may access their own journal only.
+        - **Therapist**: may access only if `journalAccessStatus = GRANTED` in an
+          APPROVED mapping with this client. Returns 403 otherwise — never 404 —
+          to avoid leaking whether a journal exists.
+      operationId: getJournal
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+      responses:
+        "200":
+          description: Journal metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Journal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /clients/{clientId}/journal/entries:
+    post:
+      tags: [Journal]
+      summary: Add an emotion entry to the journal
+      description: >
+        Only the client themselves may add entries.
+        Therapists cannot write to a client's journal under any circumstances.
+      operationId: createJournalEntry
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJournalEntryRequest"
+      responses:
+        "201":
+          description: Journal entry created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      tags: [Journal]
+      summary: List journal entries
+      description: >
+        Returns a paginated, filterable list of emotion entries.
+
+        **Access control**:
+        - **Client**: own entries only.
+        - **Therapist**: read-only access if `journalAccessStatus = GRANTED`.
+          Returns 403 if access has not been granted.
+      operationId: listJournalEntries
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+        - name: fromDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Include only entries with `emotionTimestamp` on or after this date.
+        - name: toDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Include only entries with `emotionTimestamp` on or before this date.
+        - name: emotion
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by emotion category (case-insensitive exact match).
+        - name: intensity
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EmotionIntensity"
+          description: Filter by intensity level.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of journal entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedJournalEntryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /clients/{clientId}/journal/entries/{entryId}:
+    get:
+      tags: [Journal]
+      summary: Get a specific journal entry
+      description: >
+        **Access control**: same rules as `GET /clients/{clientId}/journal/entries`.
+      operationId: getJournalEntry
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+        - $ref: "#/components/parameters/EntryIdPath"
+      responses:
+        "200":
+          description: Journal entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Journal]
+      summary: Update a journal entry
+      description: >
+        Only the client themselves may edit their own journal entries.
+        Therapists cannot modify journal entries under any circumstances.
+      operationId: updateJournalEntry
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+        - $ref: "#/components/parameters/EntryIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateJournalEntryRequest"
+      responses:
+        "200":
+          description: Updated journal entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Journal]
+      summary: Delete a journal entry
+      description: Only the client themselves may delete their own journal entries.
+      operationId: deleteJournalEntry
+      parameters:
+        - $ref: "#/components/parameters/ClientIdPath"
+        - $ref: "#/components/parameters/EntryIdPath"
+      responses:
+        "204":
+          description: Journal entry deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # MESSAGES
+  # ============================================================
+
+  /messages:
+    post:
+      tags: [Messages]
+      summary: Send a message
+      description: >
+        Sends a message from the authenticated user to the other party in a
+        client-therapist conversation. The `senderType` and `senderId` are derived
+        from the JWT and not from the request body, to prevent spoofing.
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "201":
+          description: Message sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      tags: [Messages]
+      summary: List messages in a conversation thread
+      description: >
+        Returns the chronological message history between a specific client-therapist pair.
+        Both `clientId` and `therapistId` are required. The caller must be one of the two
+        participants, attempting to read a thread you are not part of returns 403.
+      operationId: listMessages
+      parameters:
+        - name: clientId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: ID of the client in the conversation.
+        - name: therapistId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: ID of the therapist in the conversation.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated message thread (oldest-first).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedMessageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /messages/{messageId}:
+    get:
+      tags: [Messages]
+      summary: Get a specific message
+      description: Only the sender or recipient (the two parties in the thread) may view it.
+      operationId: getMessage
+      parameters:
+        - $ref: "#/components/parameters/MessageIdPath"
+      responses:
+        "200":
+          description: Message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Messages]
+      summary: Delete a message
+      description: >
+        Only the **sender** may delete their own message.
+        The recipient cannot delete the other party's message.
+      operationId: deleteMessage
+      parameters:
+        - $ref: "#/components/parameters/MessageIdPath"
+      responses:
+        "204":
+          description: Message deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # SESSIONS
+  # ============================================================
+
+  /sessions:
+    post:
+      tags: [Sessions]
+      summary: Create a new session slot
+      description: >
+        **Therapist only.** Creates an available session slot that clients can
+        request appointments for.
+        The `therapistId` is derived from the authenticated user's JWT.
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      tags: [Sessions]
+      summary: List sessions
+      description: >
+        - **Client**: Returns available sessions (`isAvailable: true`) across all therapists.
+          May filter by `therapistId` to narrow to a specific therapist's slots.
+        - **Therapist**: Returns only sessions they own (all, not just available ones).
+      operationId: listSessions
+      parameters:
+        - name: therapistId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by therapist (optional for clients; ignored for therapists — they always see their own).
+        - name: isAvailable
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Filter by availability. Defaults to `true` for clients; no default for therapists.
+        - name: fromDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Include only sessions scheduled on or after this date.
+        - name: toDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Include only sessions scheduled on or before this date.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedSessionList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      summary: Get a session by ID
+      description: >
+        - **Client**: May view any session. Private notes are **never** included in
+          the client response.
+        - **Therapist**: May only view sessions they own. Returns 403 for other therapists' sessions.
+      operationId: getSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Session details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Sessions]
+      summary: Update a session
+      description: >
+        Only the therapist who owns the session may modify it.
+        Returns 403 for any other caller.
+      operationId: updateSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSessionRequest"
+      responses:
+        "200":
+          description: Updated session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Sessions]
+      summary: Delete a session
+      description: >
+        Only the therapist who owns the session may delete it.
+        All PENDING or CONFIRMED appointments for this session are automatically CANCELLED.
+      operationId: deleteSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "204":
+          description: Session deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /sessions/{sessionId}/start:
+    post:
+      tags: [Sessions]
+      summary: Start a session
+      description: |
+        **Therapist only (session owner).** Marks the session as IN_PROGRESS.
+
+        **Preconditions**:
+
+        | Condition | Failure |
+        |---|---|
+        | Session must exist | 404 |
+        | Caller must be the session owner | 403 |
+        | Session `status` must be `SCHEDULED` | 422 |
+        | A `CONFIRMED` appointment must exist for this session | 422 |
+        | Current server time must be on or after `scheduledAt` | 422 |
+
+        **Side effects**:
+        - Session `status` → `IN_PROGRESS`
+        - Session `startedAt` set to current server timestamp
+        - Session `isAvailable` → `false` if not already
+
+        The time check is enforced server-side regardless of what the client sends.
+        A descriptive 422 error with `scheduledAt` and `currentTime` is returned if called too early.
+      operationId: startSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Session started successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /sessions/{sessionId}/end:
+    post:
+      tags: [Sessions]
+      summary: End a session
+      description: |
+        **Therapist only (session owner).** Marks the session as COMPLETED.
+
+        **Preconditions**:
+
+        | Condition | Failure |
+        |---|---|
+        | Session must exist | 404 |
+        | Caller must be the session owner | 403 |
+        | Session `status` must be `IN_PROGRESS` | 422 |
+
+        **Side effects**:
+        - Session `status` → `COMPLETED`
+        - Session `endedAt` set to current server timestamp
+        - The `CONFIRMED` appointment for this session → `COMPLETED`
+      operationId: endSession
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Session ended successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # SESSION NOTES — PRIVATE
+  # ============================================================
+
+  /sessions/{sessionId}/notes/private:
+    get:
+      tags: [Session Notes]
+      summary: Get private notes for a session
+      description: >
+        **Therapist only (session owner).** Returns the therapist's private notes
+        for this session. These notes are **never** visible to clients.
+        Clients calling this endpoint always receive 403.
+      operationId: getPrivateNotes
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Private notes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateNotes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Session Notes]
+      summary: Create or replace private notes for a session
+      description: >
+        **Therapist only (session owner).** Upserts the private notes for this session.
+        This is a full replacement — the entire `content` field is overwritten.
+      operationId: upsertPrivateNotes
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePrivateNotesRequest"
+      responses:
+        "200":
+          description: Updated private notes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateNotes"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # SESSION NOTES — SHARED
+  # ============================================================
+
+  /sessions/{sessionId}/notes/shared:
+    get:
+      tags: [Session Notes]
+      summary: Get shared notes for a session
+      description: >
+        Returns the therapist-authored shared notes (assignments, action items, summaries).
+
+        **Access control**:
+        - **Therapist**: session owner only.
+        - **Client**: must have a CONFIRMED or COMPLETED appointment for this session.
+          Returns 403 otherwise.
+      operationId: getSharedNotes
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Shared notes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedNotes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Session Notes]
+      summary: Create or replace shared notes for a session
+      description: >
+        **Therapist only (session owner).** Upserts the shared notes for this session.
+        This is a full replacement — the entire `content` field is overwritten.
+        Clients cannot write shared notes.
+      operationId: upsertSharedNotes
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSharedNotesRequest"
+      responses:
+        "200":
+          description: Updated shared notes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedNotes"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # APPOINTMENTS
+  # ============================================================
+
+  /appointments:
+    post:
+      tags: [Appointments]
+      summary: Request an appointment for a session
+      description: >
+        **Client only.** Creates a PENDING appointment for an available session.
+
+        **Preconditions** (any failure returns the noted code):
+        - Session must exist and `isAvailable: true` → 422 if unavailable.
+        - An APPROVED mapping must exist between the client and the session's therapist → 403 if not.
+        - Client must not already have an appointment for this session → 409 if duplicate.
+      operationId: createAppointment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAppointmentRequest"
+      responses:
+        "201":
+          description: Appointment requested in PENDING state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      tags: [Appointments]
+      summary: List appointments
+      description: >
+        Returns appointments visible to the caller:
+        - **Client**: their own appointments only.
+        - **Therapist**: appointments for all their sessions.
+      operationId: listAppointments
+      parameters:
+        - name: sessionId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by session.
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AppointmentStatus"
+          description: Filter by appointment status.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Paginated list of appointments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAppointmentList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /appointments/{appointmentId}:
+    get:
+      tags: [Appointments]
+      summary: Get an appointment by ID
+      description: >
+        Only the client who requested the appointment or the therapist who owns
+        the session may view it. Returns 403 for all other callers.
+      operationId: getAppointment
+      parameters:
+        - $ref: "#/components/parameters/AppointmentIdPath"
+      responses:
+        "200":
+          description: Appointment details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    patch:
+      tags: [Appointments]
+      summary: Update appointment status
+      description: >
+        Drives the appointment state machine. See `PatchAppointmentRequest` schema
+        for the full allowed transition table. Invalid transitions or calls by the
+        wrong party return 422 or 403 respectively.
+      operationId: patchAppointment
+      parameters:
+        - $ref: "#/components/parameters/AppointmentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAppointmentRequest"
+      responses:
+        "200":
+          description: Updated appointment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Appointments]
+      summary: Delete an appointment
+      description: >
+        Hard-deletes the appointment record. Only the client who requested it or
+        the therapist who owns the session may delete it.
+        Use `PATCH` to update status to CANCELLED if you want to preserve history.
+      operationId: deleteAppointment
+      parameters:
+        - $ref: "#/components/parameters/AppointmentIdPath"
+      responses:
+        "204":
+          description: Appointment deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ============================================================
+  # SEARCH
+  # ============================================================
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Universal keyword search
+      description: |
+        Searches across all resources accessible to the authenticated user and returns
+        results grouped by resource type. If `type` is omitted, all accessible resource
+        categories are searched and every result field is populated (empty array if no
+        matches). If `type` is provided, only that category is searched.
+
+        **Security**: Results are strictly scoped to what the caller is permitted to see —
+        the same access rules that govern individual resource endpoints apply here.
+        Empty arrays are returned for categories the caller has no access to,
+        rather than 403, to avoid leaking schema information.
+
+        **Client accessible resources**:
+        - `JOURNAL_ENTRY` – their own entries.
+        - `SESSION_NOTES` – shared notes from sessions with a CONFIRMED/COMPLETED appointment.
+
+        **Therapist accessible resources**:
+        - `JOURNAL_ENTRY` – entries from clients with `journalAccessStatus = GRANTED`.
+        - `SESSION_NOTES` – private and shared notes from their own sessions.
+      parameters:
+        - name: keyword
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: The keyword to search for (case-insensitive).
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/SearchResourceType"
+          description: >
+            Optional resource-type filter. If omitted, all accessible categories are searched.
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: Search results grouped by resource type.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
