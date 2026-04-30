@@ -599,10 +599,6 @@ components:
           type: string
           readOnly: true
           example: ent_jkl654
-        journalId:
-          type: string
-          readOnly: true
-          example: jnl_ghi321
         clientId:
           type: string
           readOnly: true
