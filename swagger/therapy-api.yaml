@@ -192,7 +192,7 @@ components:
 
     ClientRegistrationRequest:
       type: object
-      required: [email, password, firstName, lastName]
+      required: [email, password, name]
       properties:
         email:
           type: string
@@ -210,7 +210,17 @@ components:
 
     TherapistRegistrationRequest:
       type: object
-      required: [email, password, firstName, lastName, licenseNumber]
+      required:
+        [
+          email,
+          password,
+          name,
+          licenseNumber,
+          specialization,
+          bio,
+          qualification,
+          yearsOfExperience,
+        ]
       properties:
         email:
           type: string
