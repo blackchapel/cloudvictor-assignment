@@ -354,7 +354,7 @@ DESCRIPTION
   share partition key clientId, co-locating a client's metadata and all their
   entries on the same DynamoDB partition for efficient reads. Two item types:
   JOURNAL (one per client, metadata only) and entries identified by a stable
-  entryId sort key. entryId is a server-generated UUID — immutable, requires
+  entryId sort key. entryId is a server-generated UUID, immutable, requires
   no client-side key tracking, and enables O(1) single-item operations without
   any auxiliary key. emotionTimestamp is a plain mutable attribute: updating it
   is a simple UpdateItem with no sort key migration.
@@ -369,13 +369,11 @@ DESCRIPTION
 ATTRIBUTES
   clientId          String    PK      Client user ID. Natural partition key (all item types)
   SK                String    SK      JOURNAL (metadata item) | entryId (entry items)
-  journalId         String    ATTR    Unique journal ID. Present on JOURNAL item only
   totalEntries      Number    ATTR    Atomic entry count. Present on JOURNAL item only
-  entryId           String    ATTR    Unique entry ID. Also the SK value on entry items
   emotion           String    ATTR    Happiness | Caring | Depression | Inadequate | Fear | Confusion | Hurt | Anger | Loneliness | Remorse
   feeling           String    ATTR    Specific feeling within the emotion category
   intensity         String    ATTR    STRONG | MEDIUM | LIGHT
-  emotionTimestamp  String    LSI_SK  When the emotion was actually felt (ISO 8601). LSI_EmotionTime range key. Fully mutable — no sort key migration needed on update
+  emotionTimestamp  String    LSI_SK  When the emotion was actually felt (ISO 8601). LSI_EmotionTime range key
   intensityTime     String    LSI_SK  Composite: intensity#emotionTimestamp. LSI_IntensityTime range key
   clientEmotion     String    GSI_PK  Composite: clientId#emotion. GSI_EmotionEntries PK
   notes             String    ATTR    Optional free-text from client
