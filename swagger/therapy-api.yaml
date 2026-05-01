@@ -71,11 +71,11 @@ info:
 
   version: 1.0.0
 
-# servers:
-#   - url: https://api.therapy-app.com/v1
-#     description: Production
-#   - url: https://dev-api.therapy-app.com/v1
-#     description: Development
+servers:
+  #   - url: https://api.therapy-app.com/v1
+  #     description: Production
+  - url: https://mpcqc90o29.execute-api.ap-south-1.amazonaws.com/prod/
+    description: Development
 
 tags:
   - name: Auth
@@ -569,12 +569,8 @@ components:
 
     Journal:
       type: object
-      description: Metadata for a client's single emotions journal. Created automatically on client registration.
+      description: Metadata for a client's single emotions journal. Identified by clientId — no separate journal ID exists. Created automatically on client registration.
       properties:
-        journalId:
-          type: string
-          readOnly: true
-          example: jnl_ghi321
         clientId:
           type: string
           example: cli_abc123
@@ -595,9 +591,10 @@ components:
     JournalEntry:
       type: object
       properties:
-        entryId:
+        journalEntryId:
           type: string
           readOnly: true
+          description: Server-generated UUID. Stable identifier; used as the DynamoDB sort key.
           example: ent_jkl654
         clientId:
           type: string
@@ -716,13 +713,17 @@ components:
           type: string
           format: date-time
           readOnly: true
+        editedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Present only if the message has been edited.
 
     SendMessageRequest:
       type: object
       required: [clientId, therapistId, content]
       description: >
         The authenticated user must be either `clientId` or `therapistId`.
-        A mapping must exist between the two parties (any `mappingStatus`).
       properties:
         clientId:
           type: string
@@ -730,6 +731,18 @@ components:
         therapistId:
           type: string
           example: thr_xyz789
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: I would like to discuss my progress before next session.
+
+    UpdateMessageRequest:
+      type: object
+      required: [content]
+      description: >
+        The authenticated user must be the sender.
+      properties:
         content:
           type: string
           minLength: 1
@@ -1250,8 +1263,8 @@ components:
         type: string
       description: Unique identifier of the appointment.
 
-    EntryIdPath:
-      name: entryId
+    JournalEntryIdPath:
+      name: journalEntryId
       in: path
       required: true
       schema:
@@ -2116,7 +2129,7 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  /clients/{clientId}/journal/entries/{entryId}:
+  /clients/{clientId}/journal/entries/{journalEntryId}:
     get:
       tags: [Journal]
       summary: Get a specific journal entry
@@ -2125,7 +2138,7 @@ paths:
       operationId: getJournalEntry
       parameters:
         - $ref: "#/components/parameters/ClientIdPath"
-        - $ref: "#/components/parameters/EntryIdPath"
+        - $ref: "#/components/parameters/JournalEntryIdPath"
       responses:
         "200":
           description: Journal entry.
@@ -2151,7 +2164,7 @@ paths:
       operationId: updateJournalEntry
       parameters:
         - $ref: "#/components/parameters/ClientIdPath"
-        - $ref: "#/components/parameters/EntryIdPath"
+        - $ref: "#/components/parameters/JournalEntryIdPath"
       requestBody:
         required: true
         content:
@@ -2183,7 +2196,7 @@ paths:
       operationId: deleteJournalEntry
       parameters:
         - $ref: "#/components/parameters/ClientIdPath"
-        - $ref: "#/components/parameters/EntryIdPath"
+        - $ref: "#/components/parameters/JournalEntryIdPath"
       responses:
         "204":
           description: Journal entry deleted.
@@ -2273,20 +2286,28 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   /messages/{messageId}:
-    get:
+    put:
       tags: [Messages]
-      summary: Get a specific message
-      description: Only the sender or recipient (the two parties in the thread) may view it.
-      operationId: getMessage
+      summary: Update a specific message
+      description: Only the sender may edit it within 10 minutes of sending the message.
+      operationId: updateMessage
       parameters:
         - $ref: "#/components/parameters/MessageIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMessageRequest"
       responses:
         "200":
-          description: Message.
+          description: Updated message content.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2355,10 +2376,17 @@ paths:
     get:
       tags: [Sessions]
       summary: List sessions
-      description: >
-        - **Client**: Returns available sessions (`isAvailable: true`) across all therapists.
-          May filter by `therapistId` to narrow to a specific therapist's slots.
-        - **Therapist**: Returns only sessions they own (all, not just available ones).
+      description: |
+        Returns a paginated list of sessions scoped to the caller's role.
+
+        **Client** — always returns only sessions where `isAvailable = true`.
+        Accepted filters: `therapistId`, `fromDate`, `toDate`, `page`, `pageSize`.
+        The `isAvailable` parameter is **ignored** for clients — availability is always enforced.
+
+        **Therapist** — returns only sessions created by the calling therapist.
+        Accepted filters: `isAvailable`, `fromDate`, `toDate`, `page`, `pageSize`.
+        The `therapistId` parameter is **ignored** for therapists — they always see their own sessions.
+        Omitting `isAvailable` returns all sessions regardless of availability.
       operationId: listSessions
       parameters:
         - name: therapistId
@@ -2366,13 +2394,17 @@ paths:
           required: false
           schema:
             type: string
-          description: Filter by therapist (optional for clients; ignored for therapists — they always see their own).
+          description: >
+            **Client only.** Filter sessions to a specific therapist's slots.
+            Ignored for therapist callers — they always see their own sessions.
         - name: isAvailable
           in: query
           required: false
           schema:
             type: boolean
-          description: Filter by availability. Defaults to `true` for clients; no default for therapists.
+          description: >
+            **Therapist only.** Filter by slot availability. When omitted, all sessions are returned.
+            Ignored for client callers — availability is always enforced as `true` for clients.
         - name: fromDate
           in: query
           required: false
@@ -2706,12 +2738,11 @@ paths:
     post:
       tags: [Appointments]
       summary: Request an appointment for a session
-      description: >
+      description: |
         **Client only.** Creates a PENDING appointment for an available session.
 
         **Preconditions** (any failure returns the noted code):
         - Session must exist and `isAvailable: true` → 422 if unavailable.
-        - An APPROVED mapping must exist between the client and the session's therapist → 403 if not.
         - Client must not already have an appointment for this session → 409 if duplicate.
       operationId: createAppointment
       requestBody:
@@ -2731,8 +2762,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -2745,10 +2774,20 @@ paths:
     get:
       tags: [Appointments]
       summary: List appointments
-      description: >
-        Returns appointments visible to the caller:
-        - **Client**: their own appointments only.
-        - **Therapist**: appointments for all their sessions.
+      description: |
+        Returns appointments visible to the caller.
+
+        **Therapist**:
+        - `sessionId` is **required**. The session must be owned by the calling therapist.
+        - Returns all appointments for that session regardless of status.
+        - `status` filter is **not** supported.
+
+        **Client**:
+        - Returns all of the client's own appointments.
+        - Optional `status` filter to narrow by appointment status.
+        - `sessionId` filter is **not** supported.
+
+        Both callers support `page` and `pageSize` for pagination.
       operationId: listAppointments
       parameters:
         - name: sessionId
@@ -2756,13 +2795,13 @@ paths:
           required: false
           schema:
             type: string
-          description: Filter by session.
+          description: "**Therapist only.** Required for therapist callers. The session must belong to the therapist."
         - name: status
           in: query
           required: false
           schema:
             $ref: "#/components/schemas/AppointmentStatus"
-          description: Filter by appointment status.
+          description: "**Client only.** Filter by appointment status."
         - $ref: "#/components/parameters/PageQuery"
         - $ref: "#/components/parameters/PageSizeQuery"
       responses:
@@ -2772,8 +2811,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaginatedAppointmentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -2782,8 +2827,9 @@ paths:
       tags: [Appointments]
       summary: Get an appointment by ID
       description: >
-        Only the client who requested the appointment or the therapist who owns
-        the session may view it. Returns 403 for all other callers.
+        Only the client who originally created the appointment, or the therapist
+        who received the appointment request (owns the session), may view it.
+        Returns 403 for all other callers.
       operationId: getAppointment
       parameters:
         - $ref: "#/components/parameters/AppointmentIdPath"

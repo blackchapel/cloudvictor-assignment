@@ -74,7 +74,7 @@ GSI
   NAME        GSI_EmailIndex
   HASH        email
   RANGE       userType
-  PROJECTION  INCLUDE userId, userType, email, passwordHash, name, phoneNumber, createdAt, updatedAt,
+  PROJECTION  INCLUDE userId, userType, email, passwordHash, name, createdAt, updatedAt,
                       licenseNumber, specialization, bio, qualification, yearsOfExperience
   DESCRIPTION O(1) login lookup by email without scanning the full table. userType
               as range key allows exact-match filtering in a single Query.
@@ -88,7 +88,7 @@ GSI
   NAME        GSI_UserTypeIndex
   HASH        userType
   RANGE       yearsOfExperience
-  PROJECTION  INCLUDE userId, userType, name, email, phoneNumber, createdAt, updatedAt,
+  PROJECTION  INCLUDE userId, userType, name, email, createdAt, updatedAt,
                       licenseNumber, specialization, bio, qualification, yearsOfExperience
   DESCRIPTION Co-locates all THERAPIST items on one GSI partition for GET /therapists.
               yearsOfExperience as range key enables O(1) key-condition range queries
@@ -354,10 +354,10 @@ DESCRIPTION
   share partition key clientId, co-locating a client's metadata and all their
   entries on the same DynamoDB partition for efficient reads. Two item types:
   JOURNAL (one per client, metadata only) and entries identified by a stable
-  entryId sort key. entryId is a server-generated UUID, immutable, requires
-  no client-side key tracking, and enables O(1) single-item operations without
-  any auxiliary key. emotionTimestamp is a plain mutable attribute: updating it
-  is a simple UpdateItem with no sort key migration.
+  journalEntryId sort key. journalEntryId is a server-generated UUID, immutable,
+  requires no client-side key tracking, and enables O(1) single-item operations
+  without any auxiliary key. emotionTimestamp is a plain mutable attribute:
+  updating it is a simple UpdateItem with no sort key migration.
   LSI_EmotionTime provides time-ordered listing by emotionTimestamp on the same
   partition (no extra RCU hop). LSI_IntensityTime handles intensity+date queries
   on the same partition. GSI_EmotionEntries uses composite key clientId#emotion
@@ -368,7 +368,7 @@ DESCRIPTION
 
 ATTRIBUTES
   clientId          String    PK      Client user ID. Natural partition key (all item types)
-  SK                String    SK      JOURNAL (metadata item) | entryId (entry items)
+  journalEntryId    String    SK      JOURNAL (metadata item) | <uuid> (entry items)
   totalEntries      Number    ATTR    Atomic entry count. Present on JOURNAL item only
   emotion           String    ATTR    Happiness | Caring | Depression | Inadequate | Fear | Confusion | Hurt | Anger | Loneliness | Remorse
   feeling           String    ATTR    Specific feeling within the emotion category
@@ -382,7 +382,7 @@ ATTRIBUTES
 
 KEYS
   HASH    clientId
-  RANGE   SK
+  RANGE   journalEntryId
 
 LSI
   NAME        LSI_EmotionTime
@@ -392,7 +392,7 @@ LSI
               Query: clientId = :cid, emotionTimestamp BETWEEN :from AND :to.
               ScanIndexForward=true for chronological order, false for reverse.
               LSI shares the base table PK — no extra partition hop, lower latency and cost.
-              Naturally sparse — JOURNAL item carries no emotionTimestamp attribute.
+              Naturally sparse — JOURNAL metadata item carries no emotionTimestamp attribute.
 
 LSI
   NAME        LSI_IntensityTime
@@ -418,16 +418,17 @@ ACCESS_PATTERNS
   API         GET /clients/{clientId}/journal
   OPERATION   GetItem
   INDEX       JournalTable
-  KEYS        clientId = :clientId, SK = JOURNAL
-  NOTES       O(1) metadata lookup. Returns journalId and totalEntries counter.
+  KEYS        clientId = :clientId, journalEntryId = JOURNAL
+  NOTES       O(1) metadata lookup. Returns totalEntries counter and journal metadata.
+              Journal is owned by the client and identified by clientId alone — no separate journalId.
               Therapist callers must have mappingStatus=APPROVED + journalAccessStatus=GRANTED.
 
 ACCESS_PATTERNS
   API         POST /clients/{clientId}/journal/entries
   OPERATION   TransactWriteItems
   INDEX       JournalTable
-  KEYS        clientId = :clientId, SK = entryId
-  NOTES       Atomically: 1. PutItem new entry item (SK = server-generated entryId).
+  KEYS        clientId = :clientId, journalEntryId = <server-generated uuid>
+  NOTES       Atomically: 1. PutItem new entry item (journalEntryId = server-generated uuid).
               2. UpdateItem JOURNAL item: ADD totalEntries 1, SET updatedAt = :now.
               Compute clientEmotion = clientId#emotion and
               intensityTime = intensity#emotionTimestamp before writing.
@@ -458,27 +459,27 @@ ACCESS_PATTERNS
               and date in one expression with zero FilterExpression overhead.
 
 ACCESS_PATTERNS
-  API         GET /clients/{clientId}/journal/entries/{entryId}
+  API         GET /clients/{clientId}/journal/entries/{journalEntryId}
   OPERATION   GetItem
   INDEX       JournalTable
-  KEYS        clientId = :clientId, SK = entryId
-  NOTES       O(1) direct lookup by entryId alone. No emotionTimestamp required.
+  KEYS        clientId = :clientId, journalEntryId = :journalEntryId
+  NOTES       O(1) direct lookup by journalEntryId. No emotionTimestamp required.
 
 ACCESS_PATTERNS
-  API         PUT /clients/{clientId}/journal/entries/{entryId}
+  API         PUT /clients/{clientId}/journal/entries/{journalEntryId}
   OPERATION   UpdateItem
   INDEX       JournalTable
-  KEYS        clientId = :clientId, SK = entryId
+  KEYS        clientId = :clientId, journalEntryId = :journalEntryId
   NOTES       Simple UpdateItem regardless of whether emotionTimestamp changes —
               it is a plain attribute, no sort key migration needed.
               Re-compute and SET intensityTime and clientEmotion if emotion,
               intensity, or emotionTimestamp is updated.
 
 ACCESS_PATTERNS
-  API         DELETE /clients/{clientId}/journal/entries/{entryId}
+  API         DELETE /clients/{clientId}/journal/entries/{journalEntryId}
   OPERATION   TransactWriteItems
   INDEX       JournalTable
-  KEYS        clientId = :clientId, SK = entryId
+  KEYS        clientId = :clientId, journalEntryId = :journalEntryId
   NOTES       Atomically: 1. DeleteItem entry item.
               2. UpdateItem JOURNAL item: ADD totalEntries -1, SET updatedAt = :now.
 
@@ -504,6 +505,7 @@ ATTRIBUTES
   senderId     String    ATTR    userId of sender. Set from JWT, never from request body
   content      String    ATTR    Message body. Max 2000 characters
   sentAt       String    ATTR    ISO 8601 send timestamp
+  editedAt     String    ATTR    ISO 8601 edit timestamp. Present only if the message has been edited
 
 KEYS
   HASH    threadKey
@@ -516,7 +518,7 @@ GSI
   PROJECTION  ALL
   DESCRIPTION O(1) single-message lookup by messageId. Only message items carry
               messageId so no unrelated items pollute this index partition.
-              Used by GET /messages/{messageId} and DELETE /messages/{messageId}.
+              Used by PUT /messages/{messageId} and DELETE /messages/{messageId}.
 
 ACCESS_PATTERNS
   API         POST /messages
@@ -539,11 +541,14 @@ ACCESS_PATTERNS
               Paginated with ExclusiveStartKey on messageSk.
 
 ACCESS_PATTERNS
-  API         GET /messages/{messageId}
-  OPERATION   Query
-  INDEX       GSI_MessageById
-  KEYS        messageId = :messageId
-  NOTES       Application validates caller is clientId or therapistId on returned item.
+  API         PUT /messages/{messageId}
+  OPERATION   Query then UpdateItem
+  INDEX       GSI_MessageById then MessageTable
+  KEYS        messageId = :messageId (to retrieve threadKey and messageSk), then threadKey + messageSk to update
+  NOTES       1. Query GSI_MessageById to retrieve threadKey, messageSk, senderId, and sentAt.
+              2. Validate caller matches senderId (only sender may edit).
+              3. Validate sentAt is within 10 minutes of now (edit window).
+              4. UpdateItem on base table: SET content = :c, editedAt = :ea.
 
 ACCESS_PATTERNS
   API         DELETE /messages/{messageId}
@@ -651,9 +656,9 @@ ACCESS_PATTERNS
   OPERATION   GetItem
   INDEX       SessionTable
   KEYS        sessionId = :sessionId
-  NOTES       Returns full item including notes. privateNotes excluded from response
-              for CLIENT callers at application layer. confirmedAppointmentId present
-              if session is booked.
+  NOTES       Returns full item including notes. privateNotes always excluded for CLIENT
+              callers. sharedNotes excluded for CLIENT callers unless session status is
+              IN_PROGRESS or COMPLETED. confirmedAppointmentId present if session is booked.
 
 ACCESS_PATTERNS
   API         PUT /sessions/{sessionId}
@@ -716,7 +721,7 @@ ACCESS_PATTERNS
   INDEX       SessionTable
   KEYS        sessionId = :sessionId
   NOTES       Return only sharedNotes field from the item.
-              CLIENT: verify confirmedAppointmentId is present (has a confirmed appointment).
+              CLIENT: visible only if session status = IN_PROGRESS or COMPLETED.
               THERAPIST: verify therapistId = callerId.
 
 ACCESS_PATTERNS
@@ -854,7 +859,7 @@ ACCESS_PATTERNS
   FILTER      contains(:field, :keyword) across relevant text fields
   NOTES       DynamoDB has no native full-text search. Each resource queried separately.
               THERAPIST: Query GSI_UserTypeIndex, FilterExpression on name/bio/specialization.
-              JOURNAL_ENTRY: Query JournalTable (clientId=:id, SK BETWEEN first-entry and last-entry),
+              JOURNAL_ENTRY: Query JournalTable (clientId=:id, journalEntryId BETWEEN first-entry and last-entry),
                 FilterExpression contains on emotion/feeling/notes.
               SESSION_NOTES: GetItem NOTES#PRIVATE + NOTES#SHARED per accessible session,
                 FilterExpression contains on content.
