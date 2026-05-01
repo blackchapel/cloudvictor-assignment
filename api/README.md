@@ -1,3 +1,26 @@
+<p align="center">
+  <img src="https://img.shields.io/badge/AWS%20Lambda-Java%2011-blue?logo=amazon-aws" />
+  <img src="https://img.shields.io/badge/DynamoDB-Serverless-green?logo=amazon-dynamodb" />
+  <img src="https://img.shields.io/badge/CDK-Infrastructure-orange?logo=amazon-aws" />
+</p>
+
+# 🧠 Therapy Journalling API — Backend
+
+This is the backend implementation for the Therapy Journalling platform, built with Java, AWS Lambda, API Gateway, and DynamoDB, and deployed using AWS CDK. It powers secure journalling, therapist–client mapping, session management, and messaging.
+
+---
+
+## 📚 Table of Contents
+
+- [Implemented APIs](#implemented-apis)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [Build & Deploy](#build--deploy)
+- [Authentication](#authentication)
+- [DynamoDB Tables](#dynamodb-tables)
+- [Design Decisions & Assumptions](#design-decisions--assumptions)
+
+---
 # Therapy API — Backend Implementation
 
 Java + AWS Lambda + API Gateway + DynamoDB, deployed via AWS CDK.
@@ -78,34 +101,31 @@ api/
 
 ## Build & Deploy
 
-### 1. Build the Lambda JAR
+1. **Build the Lambda JAR**
+  ```bash
+  cd api
+  mvn package -pl application -DskipTests
+  ```
+  _Produces `application/target/therapy-api-application.jar` (fat JAR)_
 
-```bash
-cd api
-mvn package -pl application -DskipTests
-```
+2. **Bootstrap CDK (first time only)**
+  ```bash
+  cd infrastructure
+  cdk bootstrap
+  ```
 
-This produces `application/target/therapy-api-application.jar` (~17 MB fat JAR).
+3. **Deploy**
+  ```bash
+  cd infrastructure
+  cdk deploy
+  ```
+  _CDK will output the API Gateway base URL after deployment:_
+  ```
+  Outputs:
+  TherapyApiStack.TherapyRestApiEndpoint = https://<id>.execute-api.<region>.amazonaws.com/prod/
+  ```
 
-### 2. Bootstrap CDK (first time only)
-
-```bash
-cd infrastructure
-cdk bootstrap
-```
-
-### 3. Deploy
-
-```bash
-cd infrastructure
-cdk deploy
-```
-
-CDK will output the API Gateway base URL after deployment:
-```
-Outputs:
-TherapyApiStack.TherapyRestApiEndpoint = https://<id>.execute-api.<region>.amazonaws.com/prod/
-```
+---
 
 ## Authentication
 
@@ -136,6 +156,19 @@ Use the token as `Authorization: Bearer <token>` on all subsequent requests.
 
 ## DynamoDB Tables
 
+| Table                   | PK / SK                                      | Key GSIs                                               |
+|-------------------------|----------------------------------------------|--------------------------------------------------------|
+| `TherapyUserTable`      | `userId`                                    | GSI_EmailIndex, GSI_UserTypeIndex                      |
+| `TherapySessionTable`   | `sessionId`                                 | GSI_TherapistSessions, GSI_StatusSchedule              |
+| `TherapyMappingTable`   | `mappingId`                                 | GSI_ClientMappings, GSI_TherapistMappings, GSI_ClientTherapistLookup |
+| `TherapyMessageTable`   | `threadKey` (`THREAD#{cid}#{tid}`), `messageSk` (`sentAt#messageId`) | GSI_MessageById |
+| `TherapyRelationshipTable` | `clientId`, `therapistId`                 | GSI_TherapistRelationships                             |
+| `TherapyAppointmentTable`  | `appointmentId`                           | GSI_ClientAppointments, GSI_TherapistAppointments, GSI_SessionAppointments, GSI_ClientSessionDedup |
+
+See [db_design/](../db_design/) for the full schema, index projections, and access patterns.
+
+---
+
 | Table | PK | SK | Key GSIs |
 | --- | --- | --- | --- |
 | `TherapyUserTable` | `userId` | — | GSI_EmailIndex, GSI_UserTypeIndex |
@@ -149,15 +182,31 @@ See [db_design/](../db_design/) for the full schema, index projections, and acce
 
 ## Design Decisions & Assumptions
 
-1. **One Lambda per API** — 23 separate Lambda functions (3 auth + 5 sessions + 6 mappings + 4 messages + 5 appointments); consistent with the assignment requirement and the reference starting point.
-2. **JWT secret in env var** — acceptable for assignment scope; swap for AWS Secrets Manager in production.
-3. **DynamoDB PAY_PER_REQUEST** — no capacity planning required for a demo/assignment workload.
-4. **Pagination** — DynamoDB cursor-based pagination is simplified to `page`/`pageSize` query parameters for the assignment. Passing `null` as `exclusiveStartKey` always returns the first page; true cursor pagination would require exposing a `nextToken` derived from DynamoDB's `LastEvaluatedKey`.
-5. **Password hashing** — BCrypt via `org.mindrot:jbcrypt`. The stored attribute is named `passwordHash` and is never included in any API response.
-6. **Email uniqueness** — enforced at registration time via `GSI_EmailIndex` query before the `PutItem`. The same 409 response is returned whether the conflicting account is a client or therapist.
-7. **`yearsOfExperience` mandatory for therapists** — it is the sort key on `GSI_UserTypeIndex` which powers the therapist discovery endpoint. Without it a therapist would be invisible to clients browsing therapists.
-8. **RelationshipTable sync** — the `RelationshipTable` is a denormalised read model. It is kept in sync whenever mapping status or journal access changes (`UpdateMappingStatusHandler`, `UpdateJournalAccessHandler`). Sync failures are logged but do not fail the primary request.
+1. **One Lambda per API**: 23 separate Lambda functions (3 auth + 5 sessions + 6 mappings + 4 messages + 5 appointments); consistent with the assignment requirement and the reference starting point.
+2. **JWT secret in env var**: acceptable for assignment scope; swap for AWS Secrets Manager in production.
+3. **DynamoDB PAY_PER_REQUEST**: no capacity planning required for a demo/assignment workload.
+4. **Pagination**: DynamoDB cursor-based pagination is simplified to `page`/`pageSize` query parameters for the assignment. Passing `null` as `exclusiveStartKey` always returns the first page; true cursor pagination would require exposing a `nextToken` derived from DynamoDB's `LastEvaluatedKey`.
+5. **Password hashing**: BCrypt via `org.mindrot:jbcrypt`. The stored attribute is named `passwordHash` and is never included in any API response.
+6. **Email uniqueness**: enforced at registration time via `GSI_EmailIndex` query before the `PutItem`. The same 409 response is returned whether the conflicting account is a client or therapist.
+8. **RelationshipTable sync**: the `RelationshipTable` is a denormalised read model. It is kept in sync whenever mapping status or journal access changes (`UpdateMappingStatusHandler`, `UpdateJournalAccessHandler`). Sync failures are logged but do not fail the primary request.
 9. **No mapping required to send messages** — any authenticated user who names themselves as `clientId` or `therapistId` in the request can send a message. A relationship row is upserted on first message.
 10. **privateNotes access** — `GetSessionHandler` strips `privateNotes` from the response for CLIENT callers at the application layer. `UpdateSessionHandler` rejects a `privateNotes` field from CLIENT callers with 403 before the DynamoDB write.
 11. **Appointment confirmation** — Confirming an appointment (PENDING→CONFIRMED) batch-rejects all other PENDING appointments for the same session and marks the session `isAvailable=false`. These writes are sequential (not transactional) for simplicity; a production system would use DynamoDB `TransactWriteItems`. The `pendingCount` counter on SessionTable is updated atomically with `ADD` expressions.
 12. **Therapist list appointments** — Therapists must supply a `sessionId` query parameter and may only list appointments for sessions they own. This scopes the query to `GSI_SessionAppointments` which is more efficient than scanning all therapist appointments.
+
+---
+
+## 🧪 API Testing with Postman
+
+Import the ready-to-use [therapy_journalling_api.postman_collection.json](../postman/therapy_journalling_api.postman_collection.json) into Postman for instant access to all endpoints, example requests, and authentication flows.
+
+---
+
+## 📖 Further Reading
+
+- [../swagger/README.md](../swagger/README.md) — API documentation & OpenAPI spec
+- [../db_design/README.md](../db_design/README.md) — DynamoDB schema & access patterns
+
+---
+
+Built for the CloudVictor assignment &mdash; see root [README](../README.md) for details.
