@@ -21,7 +21,7 @@ import java.util.Optional;
  *
  * Full state machine per OpenAPI spec:
  *
- *   Therapist (mapping must be APPROVED):
+ *   Therapist (mapping must be PENDING or APPROVED):
  *     NONE      → REQUESTED
  *     REVOKED   → REQUESTED
  *
@@ -31,7 +31,7 @@ import java.util.Optional;
  *     REQUESTED → REVOKED
  *     GRANTED   → REVOKED
  */
-public class UpdateJournalAccessHandler extends BaseHandler
+public class UpdateJournalAccessHandler  extends BaseHandler
         implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
 
     private static final DynamoDbClient DDB = DynamoDbClientFactory.create();
@@ -88,10 +88,9 @@ public class UpdateJournalAccessHandler extends BaseHandler
         String currentJas     = mapping.getJournalAccessStatus();
         String mappingStatus  = mapping.getMappingStatus();
 
-        // TODO: Only client can approve journal access, therapist can request is via create / update mapping api
         APIGatewayProxyResponseEvent result;
         if (caller.isTherapist()) {
-            result = applyTherapistTransition(mappingId, newJas, currentJas, mappingStatus, context);
+            result = applyTherapistTransition(mappingId, newJas, currentJas, mappingStatus, mapping.getInitiatedBy(), context);
         } else {
             result = applyClientTransition(mappingId, newJas, currentJas, mappingStatus, context);
         }
@@ -115,15 +114,21 @@ public class UpdateJournalAccessHandler extends BaseHandler
     }
 
     /**
-     * Therapist allowed transitions — mapping must already be APPROVED.
+     * Therapist allowed transitions:
+     *   - If therapist initiated the mapping: PENDING or APPROVED allowed.
+     *   - If client initiated the mapping: therapist must approve the mapping first (APPROVED only).
+     *   - REJECTED is always blocked.
      * Returns a non-null error response if the transition is invalid, null on success.
      */
     private APIGatewayProxyResponseEvent applyTherapistTransition(
-            String mappingId, String newJas, String currentJas, String mappingStatus, Context context) {
+            String mappingId, String newJas, String currentJas, String mappingStatus, String initiatedBy, Context context) {
 
-        if (!"APPROVED".equals(mappingStatus)) {
+        if ("REJECTED".equals(mappingStatus)) {
+            return ApiGatewayUtils.unprocessable("Cannot request journal access on a REJECTED mapping.");
+        }
+        if ("PENDING".equals(mappingStatus) && "CLIENT".equals(initiatedBy)) {
             return ApiGatewayUtils.unprocessable(
-                    "Therapists may only update journal access on an APPROVED mapping. Current mapping status: " + mappingStatus + ".");
+                    "You must approve the client's mapping request before requesting journal access.");
         }
         if (!"REQUESTED".equals(newJas)) {
             return ApiGatewayUtils.forbidden("Therapists may only set journalAccessStatus to REQUESTED.");
