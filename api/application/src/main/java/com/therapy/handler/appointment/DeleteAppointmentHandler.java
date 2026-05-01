@@ -21,7 +21,6 @@ public class DeleteAppointmentHandler extends BaseHandler
     private static final DynamoDbClient DDB = DynamoDbClientFactory.create();
     private static final AppointmentRepository REPO = new AppointmentRepository(DDB);
 
-    // TODO: appointment can be deleted only if in pending or rejected status
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         APIGatewayProxyResponseEvent[] authOut = new APIGatewayProxyResponseEvent[1];
@@ -54,6 +53,11 @@ public class DeleteAppointmentHandler extends BaseHandler
 
         if (!isParty) {
             return ApiGatewayUtils.forbidden("You do not have permission to delete this appointment.");
+        }
+
+        String status = appt.getStatus();
+        if ("CONFIRMED".equals(status) || "COMPLETED".equals(status) || "S".equals(status)) {
+            return ApiGatewayUtils.badRequest("Only appointments in PENDING or REJECTED status can be deleted.");
         }
 
         try {

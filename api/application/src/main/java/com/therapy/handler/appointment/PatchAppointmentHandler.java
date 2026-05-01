@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.therapy.handler.BaseHandler;
 import com.therapy.model.Appointment;
 import com.therapy.model.CallerContext;
+import com.therapy.model.Session;
 import com.therapy.repository.AppointmentRepository;
 import com.therapy.repository.SessionRepository;
 import com.therapy.util.ApiGatewayUtils;
@@ -29,7 +30,6 @@ public class PatchAppointmentHandler extends BaseHandler
     private static final Set<String> VALID_STATUSES = Set.of(
             "CONFIRMED", "CANCELLED", "COMPLETED", "REJECTED");
 
-    // TODO: add cancellation logic
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         APIGatewayProxyResponseEvent[] authOut = new APIGatewayProxyResponseEvent[1];
@@ -101,6 +101,23 @@ public class PatchAppointmentHandler extends BaseHandler
                 }
                 SESSION_REPO.decrementPendingCount(appt.getSessionId());
                 SESSION_REPO.markBooked(appt.getSessionId(), appointmentId);
+            } else if ("CANCELLED".equals(newStatus) && "CONFIRMED".equals(currentStatus)) {
+                Optional<Session> sessionOpt = SESSION_REPO.findById(appt.getSessionId());
+                if (sessionOpt.isEmpty()) {
+                    return ApiGatewayUtils.notFound("Session not found.");
+                }
+                Session session = sessionOpt.get();
+                if (hasSessionStarted(session)) {
+                    return ApiGatewayUtils.unprocessable(
+                            "Confirmed appointment can only be cancelled before therapist starts the session.");
+                }
+
+                REPO.updateStatus(appointmentId, "CANCELLED", now);
+                if (caller.isTherapist()) {
+                    SESSION_REPO.markCancelledByTherapist(appt.getSessionId());
+                } else {
+                    SESSION_REPO.markScheduledAndAvailable(appt.getSessionId());
+                }
             } else if ("CANCELLED".equals(newStatus) && "PENDING".equals(currentStatus)) {
                 REPO.updateStatus(appointmentId, "CANCELLED", now);
                 SESSION_REPO.decrementPendingCount(appt.getSessionId());
@@ -125,5 +142,12 @@ public class PatchAppointmentHandler extends BaseHandler
         } else {
             return ("PENDING".equals(from) || "CONFIRMED".equals(from)) && "CANCELLED".equals(to);
         }
+    }
+
+    private boolean hasSessionStarted(Session session) {
+        String status = session.getStatus();
+        return (session.getStartedAt() != null && !session.getStartedAt().trim().isEmpty())
+                || "IN_PROGRESS".equals(status)
+                || "COMPLETED".equals(status);
     }
 }

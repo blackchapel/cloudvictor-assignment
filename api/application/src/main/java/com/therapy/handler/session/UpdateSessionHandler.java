@@ -26,7 +26,6 @@ public class UpdateSessionHandler extends BaseHandler
     private static final DynamoDbClient DDB = DynamoDbClientFactory.create();
     private static final SessionRepository REPO = new SessionRepository(DDB);
 
-    // TODO: Should not be able to update time once confirmed or completed appointment exists, add cancellation logic
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         APIGatewayProxyResponseEvent[] authOut = new APIGatewayProxyResponseEvent[1];
@@ -86,6 +85,12 @@ public class UpdateSessionHandler extends BaseHandler
         if (body.hasNonNull("scheduledAt")) {
             String scheduledAt = body.get("scheduledAt").asText("").trim();
             if (scheduledAt.isBlank()) return ApiGatewayUtils.badRequest("'scheduledAt' must not be blank.");
+            String status = opt.get().getStatus();
+            if (("CONFIRMED".equals(status) || "COMPLETED".equals(status)
+                    || "IN_PROGRESS".equals(status) || "CANCELLED".equals(status))
+                    && !opt.get().getScheduledAt().equals(scheduledAt)) {
+                return ApiGatewayUtils.badRequest("Cannot change 'scheduledAt' for sessions that has " + status + " status.");
+            }
             try {
                 Instant.parse(scheduledAt);
             } catch (DateTimeParseException e) {

@@ -162,6 +162,36 @@ public class SessionRepository {
                 .build());
     }
 
+    /** Cancels a confirmed session when therapist cancels the confirmed appointment. */
+    public void markCancelledByTherapist(String sessionId) {
+        ddb.updateItem(UpdateItemRequest.builder()
+                .tableName(TABLE)
+                .key(key(sessionId))
+                .updateExpression("SET #st = :cancelled, isAvailable = :false, updatedAt = :now REMOVE confirmedAppointmentId")
+                .expressionAttributeNames(Map.of("#st", "status"))
+                .expressionAttributeValues(Map.of(
+                        ":cancelled", s("CANCELLED"),
+                        ":false",     AttributeValue.builder().bool(false).build(),
+                        ":now",       s(now())))
+                .conditionExpression("attribute_exists(sessionId)")
+                .build());
+    }
+
+    /** Re-opens a confirmed session when client cancels their confirmed appointment. */
+    public void markScheduledAndAvailable(String sessionId) {
+        ddb.updateItem(UpdateItemRequest.builder()
+                .tableName(TABLE)
+                .key(key(sessionId))
+                .updateExpression("SET #st = :scheduled, isAvailable = :true, updatedAt = :now REMOVE confirmedAppointmentId")
+                .expressionAttributeNames(Map.of("#st", "status"))
+                .expressionAttributeValues(Map.of(
+                        ":scheduled", s("SCHEDULED"),
+                        ":true",      AttributeValue.builder().bool(true).build(),
+                        ":now",       s(now())))
+                .conditionExpression("attribute_exists(sessionId)")
+                .build());
+    }
+
     /** Atomically increments pendingCount. */
     public void incrementPendingCount(String sessionId) {
         ddb.updateItem(UpdateItemRequest.builder()

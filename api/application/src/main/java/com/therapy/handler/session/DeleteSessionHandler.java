@@ -21,7 +21,6 @@ public class DeleteSessionHandler extends BaseHandler
     private static final DynamoDbClient DDB = DynamoDbClientFactory.create();
     private static final SessionRepository REPO = new SessionRepository(DDB);
 
-    // TODO: session can be deleted only if they do not have cofirmed or completed appointments
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         APIGatewayProxyResponseEvent[] authOut = new APIGatewayProxyResponseEvent[1];
@@ -50,6 +49,12 @@ public class DeleteSessionHandler extends BaseHandler
         }
         if (!caller.getUserId().equals(opt.get().getTherapistId())) {
             return ApiGatewayUtils.forbidden("You do not have permission to delete this session.");
+        }
+
+        String status = opt.get().getStatus();
+        if ("CONFIRMED".equals(status) || "COMPLETED".equals(status)
+                || "IN_PROGRESS".equals(status) || "CANCELLED".equals(status)) {
+            return ApiGatewayUtils.badRequest("Only sessions in SCHEDULED status can be deleted.");
         }
 
         try {
