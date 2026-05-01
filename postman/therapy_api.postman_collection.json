@@ -1,11 +1,11 @@
 {
   "info": {
-    "_postman_id": "305ed4b3-3571-4736-b4d0-d1d036edbee2",
+    "_postman_id": "7d0e4f1b-3feb-41f5-9342-836ad0fceba8",
     "name": "Therapy Journalling API",
-    "description": "Backend API for the Therapy Journalling application supporting two user types:\n\n- **Client**: Maintains an emotions journal, maps to therapists, books sessions,\n  messages therapists, and controls who can access their journal.\n- **Therapist**: Creates session slots, maintains private and shared session notes,\n  views authorised client journals, and messages clients.\n\n## Authentication\nAll endpoints except `/auth/**` require a valid JWT Bearer token obtained from\n`POST /auth/login`. The token encodes the caller's `userId` and `userType`\n(`CLIENT` or `THERAPIST`). Every handler must validate that the token's identity\nmatches the resource being accessed.\n\n## Relationship Types\nA client and therapist can be connected in three independent ways:\n- **Mapping**: a formal, ongoing therapeutic relationship with its own approval\n  flow and journal access control. This is the only gateway to journal access.\n- **Appointment**: a client books a one-off session slot created by a therapist.\n  Does not require or auto-create a mapping.\n- **Message**: a direct message exchange between the two parties.\n  Requires any existing relationship (mapping, appointment, or prior message).\n\n## Mapping & Journal Access\nMapping and journal access are two separate concerns controlled independently:\n\n- **Mapping** must be `APPROVED` by the non-initiating party before the formal\n  therapeutic relationship is active.\n- **Journal Access** must be `GRANTED` by the client before a therapist can\n  read the client's journal.\n- **Both conditions must be met simultaneously** for a therapist to view a journal:\n  `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.\n\nEither party may initiate a mapping. Journal access can be requested at mapping\ncreation time via the `journalAccess` field, or separately via\n`PATCH /mappings/{mappingId}/journal-access`.\n\n## Session Lifecycle\nSessions are created by therapists as bookable slots. The full lifecycle is:\n\n`SCHEDULED` → `IN_PROGRESS` → `COMPLETED`\n\nA session can only be started once a client's appointment is `CONFIRMED` and\nthe current server time is on or after `scheduledAt`. Starting a session\nautomatically completes the appointment when the session is ended.\n\n## Emotion Journal\nClients log emotions using the vocabulary defined in the\n[Emotion-Feelings reference](https://tomdrummond.com/wp-content/uploads/2019/11/Emotion-Feelings.pdf).\nEach entry records an emotion category (e.g. Happiness, Fear, Anger),\na specific feeling within that category, and an intensity level (STRONG, MEDIUM, LIGHT).\n\n## Access Rules (summary)\n| Resource | CLIENT | THERAPIST |\n|---|---|---|\n| Own profile | Full CRUD | Full CRUD |\n| Other profile | Read any therapist profile | Read connected client profiles |\n| Connected parties list | `GET /clients/{clientId}/therapists` | `GET /therapists/{therapistId}/clients` |\n| Journal entries (write) | Own only | ✗ Never |\n| Journal entries (read) | Own only | Mapped client with `APPROVED` mapping + `GRANTED` access |\n| Sessions | Read available sessions | Full CRUD on own sessions |\n| Session private notes | ✗ Never | Own sessions only |\n| Session shared notes | Read if CONFIRMED/COMPLETED appointment | Own sessions (read/write) |\n| Messages | Participant only | Participant only |\n| Appointments | Own (create/cancel) | Own sessions (confirm/reject/cancel/complete) |\n| Search | Own journal + shared session notes | Private session notes + shared session notes + accessible client journals |\n",
+    "description": "Backend API for the Therapy Journalling application supporting two user types:\n\n- **Client**: Maintains an emotions journal, maps to therapists, books sessions,\n  messages therapists, and controls who can access their journal.\n- **Therapist**: Creates session slots, maintains private and shared session notes,\n  views authorised client journals, and messages clients.\n\n## Authentication\nAll endpoints except `/auth/**` require a valid JWT Bearer token obtained from\n`POST /auth/login`. The token encodes the caller's `userId` and `userType`\n(`CLIENT` or `THERAPIST`). Every handler must validate that the token's identity\nmatches the resource being accessed.\n\n## Relationship Types\nA client and therapist can be connected in three independent ways:\n- **Mapping**: a formal, ongoing therapeutic relationship with its own approval\n  flow and journal access control. This is the only gateway to journal access.\n- **Appointment**: a client books a one-off session slot created by a therapist.\n  Does not require or auto-create a mapping.\n- **Message**: a direct message exchange between the two parties.\n  Requires any existing relationship (mapping, appointment, or prior message).\n\n## Mapping & Journal Access\nMapping and journal access are two separate concerns controlled independently:\n\n- **Mapping** must be `APPROVED` by the non-initiating party before the formal\n  therapeutic relationship is active.\n- **Journal Access** must be `GRANTED` by the client before a therapist can\n  read the client's journal.\n- **Both conditions must be met simultaneously** for a therapist to view a journal:\n  `mappingStatus = APPROVED` AND `journalAccessStatus = GRANTED`.\n\nEither party may initiate a mapping. Journal access can be requested at mapping\ncreation time via the `journalAccess` field, or separately via\n`PATCH /mappings/{mappingId}/journal-access`.\n\n## Session Lifecycle\nSessions are created by therapists as bookable slots. The full lifecycle is:\n\n`SCHEDULED` → `IN_PROGRESS` → `COMPLETED`\nwith optional cancellation to `CANCELLED` before completion.\n\nA session can only be started once a client's appointment is `CONFIRMED` and\nthe current server time is on or after `scheduledAt`. Starting a session\nautomatically completes the appointment when the session is ended.\n\n## Emotion Journal\nClients log emotions using the vocabulary defined in the\n[Emotion-Feelings reference](https://tomdrummond.com/wp-content/uploads/2019/11/Emotion-Feelings.pdf).\nEach entry records an emotion category (e.g. Happiness, Fear, Anger),\na specific feeling within that category, and an intensity level (STRONG, MEDIUM, LIGHT).\n\n## Access Rules (summary)\n| Resource | CLIENT | THERAPIST |\n|---|---|---|\n| Own profile | Full CRUD | Full CRUD |\n| Other profile | Read any therapist profile | Read connected client profiles |\n| Connected parties list | `GET /clients/{clientId}/therapists` | `GET /therapists/{therapistId}/clients` |\n| Journal entries (write) | Own only | ✗ Never |\n| Journal entries (read) | Own only | Mapped client with `APPROVED` mapping + `GRANTED` access |\n| Sessions | Read available sessions | Full CRUD on own sessions |\n| Session private notes | ✗ Never | Own sessions only |\n| Session shared notes | Read if CONFIRMED/COMPLETED appointment | Own sessions (read/write) |\n| Messages | Participant only | Participant only |\n| Appointments | Own (create/cancel) | Own sessions (confirm/reject/cancel/complete) |\n| Search | Own journal + shared session notes | Private session notes + shared session notes + accessible client journals |\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "54459673",
-    "_collection_link": "https://go.postman.co/collection/54459673-305ed4b3-3571-4736-b4d0-d1d036edbee2?source=collection_link"
+    "_collection_link": "https://go.postman.co/collection/54459673-7d0e4f1b-3feb-41f5-9342-836ad0fceba8?source=collection_link"
   },
   "item": [
     {
@@ -100,7 +100,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"clientId\": \"cli_abc123\",\n  \"email\": \"jane.doe@example.com\",\n  \"name\": \"Jane Doe\",\n  \"createdAt\": \"1949-01-06T15:42:02.003Z\",\n  \"updatedAt\": \"1987-04-10T12:14:20.739Z\"\n}"
+              "body": "{\n  \"clientId\": \"cli_abc123\",\n  \"email\": \"jane.doe@example.com\",\n  \"name\": \"Jane Doe\",\n  \"createdAt\": \"1982-09-19T05:54:12.863Z\",\n  \"updatedAt\": \"1968-12-10T01:29:32.630Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -352,7 +352,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"therapistId\": \"thr_xyz789\",\n  \"email\": \"john.smith@example.com\",\n  \"name\": \"John Smith\",\n  \"licenseNumber\": \"LIC-2024-12345\",\n  \"specialization\": \"Cognitive Behavioural Therapy\",\n  \"bio\": \"Experienced therapist focusing on anxiety and depression.\",\n  \"qualification\": \"MSc Psychology\",\n  \"yearsOfExperience\": 10,\n  \"createdAt\": \"1961-12-03T22:06:23.047Z\",\n  \"updatedAt\": \"1996-01-15T20:13:12.567Z\"\n}"
+              "body": "{\n  \"therapistId\": \"thr_xyz789\",\n  \"email\": \"john.smith@example.com\",\n  \"name\": \"John Smith\",\n  \"licenseNumber\": \"LIC-2024-12345\",\n  \"specialization\": \"Cognitive Behavioural Therapy\",\n  \"bio\": \"Experienced therapist focusing on anxiety and depression.\",\n  \"qualification\": \"MSc Psychology\",\n  \"yearsOfExperience\": 10,\n  \"createdAt\": \"1972-09-25T09:59:23.270Z\",\n  \"updatedAt\": \"1969-08-13T23:58:24.802Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -531,7 +531,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"abc@example.com\",\n  \"password\": \"Pass@1234\"\n}",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePass1!\"\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -602,7 +602,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"tokenType\": \"Bearer\",\n  \"expiresIn\": 3600,\n  \"userId\": \"cli_abc123\",\n  \"userType\": \"CLIENT\"\n}"
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"tokenType\": \"Bearer\",\n  \"expiresIn\": 3600,\n  \"userId\": \"cli_abc123\",\n  \"userType\": \"THERAPIST\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -768,254 +768,6 @@
       "name": "mappings",
       "item": [
         {
-          "name": "Delete a mapping",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/mappings/:mappingId",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "mappings",
-                ":mappingId"
-              ],
-              "variable": [
-                {
-                  "key": "mappingId",
-                  "value": "string",
-                  "description": "Unique identifier of the client-therapist mapping."
-                }
-              ]
-            },
-            "description": "Removes the client-therapist relationship entirely. `journalAccessStatus` is automatically set to `REVOKED` before deletion. Either party in the mapping may initiate deletion. Attempting to delete a mapping you are not part of returns 403.\n"
-          },
-          "response": [
-            {
-              "name": "Mapping deleted successfully.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "No Content",
-              "code": 204,
-              "_postman_previewlanguage": "text",
-              "header": [],
-              "cookie": [],
-              "body": ""
-            },
-            {
-              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "Unauthorized",
-              "code": 401,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
-            },
-            {
-              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "Forbidden",
-              "code": 403,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
-            },
-            {
-              "name": "404 – Not Found: the requested resource does not exist.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "Not Found",
-              "code": 404,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
-            },
-            {
-              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "Internal Server Error",
-              "code": 500,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
-            }
-          ]
-        },
-        {
           "name": "Create a new client-therapist mapping request",
           "request": {
             "method": "POST",
@@ -1100,7 +852,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"PENDING\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"THERAPIST\",\n  \"createdAt\": \"1970-03-31T01:09:52.752Z\",\n  \"updatedAt\": \"1986-11-23T19:45:23.578Z\"\n}"
+              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"REJECTED\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"CLIENT\",\n  \"createdAt\": \"2024-11-16T19:12:50.873Z\",\n  \"updatedAt\": \"1965-08-23T06:38:33.533Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -1421,7 +1173,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/mappings?mappingStatus=APPROVED&journalAccessStatus=NONE&page=1&pageSize=20",
+              "raw": "{{baseUrl}}/mappings?mappingStatus=PENDING&journalAccessStatus=REVOKED&page=1&pageSize=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1431,12 +1183,12 @@
               "query": [
                 {
                   "key": "mappingStatus",
-                  "value": "APPROVED",
+                  "value": "PENDING",
                   "description": "Filter by mapping approval status."
                 },
                 {
                   "key": "journalAccessStatus",
-                  "value": "NONE",
+                  "value": "REVOKED",
                   "description": "Filter by journal access status."
                 },
                 {
@@ -1470,7 +1222,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/mappings?mappingStatus=APPROVED&journalAccessStatus=NONE&page=1&pageSize=20",
+                  "raw": "{{baseUrl}}/mappings?mappingStatus=PENDING&journalAccessStatus=REVOKED&page=1&pageSize=20",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -1481,12 +1233,12 @@
                     {
                       "description": "Filter by mapping approval status.",
                       "key": "mappingStatus",
-                      "value": "APPROVED"
+                      "value": "PENDING"
                     },
                     {
                       "description": "Filter by journal access status.",
                       "key": "journalAccessStatus",
-                      "value": "NONE"
+                      "value": "REVOKED"
                     },
                     {
                       "description": "Page number for pagination (1-indexed).",
@@ -1511,7 +1263,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"items\": [\n    {\n      \"mappingId\": \"map_def456\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"mappingStatus\": \"PENDING\",\n      \"journalAccessStatus\": \"GRANTED\",\n      \"initiatedBy\": \"CLIENT\",\n      \"createdAt\": \"2011-04-19T21:31:23.800Z\",\n      \"updatedAt\": \"1959-04-27T11:02:24.582Z\"\n    },\n    {\n      \"mappingId\": \"map_def456\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"mappingStatus\": \"APPROVED\",\n      \"journalAccessStatus\": \"REQUESTED\",\n      \"initiatedBy\": \"CLIENT\",\n      \"createdAt\": \"2022-06-03T09:13:16.589Z\",\n      \"updatedAt\": \"2007-12-15T17:40:39.430Z\"\n    }\n  ],\n  \"total\": 2039,\n  \"page\": 2535,\n  \"pageSize\": 7688\n}"
+              "body": "{\n  \"items\": [\n    {\n      \"mappingId\": \"map_def456\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"mappingStatus\": \"REJECTED\",\n      \"journalAccessStatus\": \"REQUESTED\",\n      \"initiatedBy\": \"THERAPIST\",\n      \"createdAt\": \"1985-06-17T21:40:50.649Z\",\n      \"updatedAt\": \"2016-04-04T20:25:21.568Z\"\n    },\n    {\n      \"mappingId\": \"map_def456\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"mappingStatus\": \"REJECTED\",\n      \"journalAccessStatus\": \"GRANTED\",\n      \"initiatedBy\": \"THERAPIST\",\n      \"createdAt\": \"1949-07-14T14:41:11.158Z\",\n      \"updatedAt\": \"2017-04-14T01:06:51.966Z\"\n    }\n  ],\n  \"total\": 2066,\n  \"page\": 8773,\n  \"pageSize\": 494\n}"
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
@@ -1529,7 +1281,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/mappings?mappingStatus=APPROVED&journalAccessStatus=NONE&page=1&pageSize=20",
+                  "raw": "{{baseUrl}}/mappings?mappingStatus=PENDING&journalAccessStatus=REVOKED&page=1&pageSize=20",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -1540,12 +1292,12 @@
                     {
                       "description": "Filter by mapping approval status.",
                       "key": "mappingStatus",
-                      "value": "APPROVED"
+                      "value": "PENDING"
                     },
                     {
                       "description": "Filter by journal access status.",
                       "key": "journalAccessStatus",
-                      "value": "NONE"
+                      "value": "REVOKED"
                     },
                     {
                       "description": "Page number for pagination (1-indexed).",
@@ -1588,7 +1340,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/mappings?mappingStatus=APPROVED&journalAccessStatus=NONE&page=1&pageSize=20",
+                  "raw": "{{baseUrl}}/mappings?mappingStatus=PENDING&journalAccessStatus=REVOKED&page=1&pageSize=20",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -1599,12 +1351,12 @@
                     {
                       "description": "Filter by mapping approval status.",
                       "key": "mappingStatus",
-                      "value": "APPROVED"
+                      "value": "PENDING"
                     },
                     {
                       "description": "Filter by journal access status.",
                       "key": "journalAccessStatus",
-                      "value": "NONE"
+                      "value": "REVOKED"
                     },
                     {
                       "description": "Page number for pagination (1-indexed).",
@@ -1706,7 +1458,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"PENDING\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"THERAPIST\",\n  \"createdAt\": \"1970-03-31T01:09:52.752Z\",\n  \"updatedAt\": \"1986-11-23T19:45:23.578Z\"\n}"
+              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"REJECTED\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"CLIENT\",\n  \"createdAt\": \"2024-11-16T19:12:50.873Z\",\n  \"updatedAt\": \"1965-08-23T06:38:33.533Z\"\n}"
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
@@ -1891,38 +1643,23 @@
           ]
         },
         {
-          "name": "Approve or reject a mapping request",
+          "name": "Delete a mapping",
           "request": {
-            "method": "PATCH",
+            "method": "DELETE",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
               {
                 "key": "Accept",
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-              "options": {
-                "raw": {
-                  "headerFamily": "json",
-                  "language": "json"
-                }
-              }
-            },
             "url": {
-              "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+              "raw": "{{baseUrl}}/mappings/:mappingId",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "mappings",
-                ":mappingId",
-                "mapping-status"
+                ":mappingId"
               ],
               "variable": [
                 {
@@ -1932,47 +1669,28 @@
                 }
               ]
             },
-            "description": "Only the **non-initiating party** may call this endpoint.\nUsed to approve or reject a PENDING mapping request.\n\n| Caller | From → To |\n|---|---|\n| Non-initiating party | `PENDING → APPROVED` |\n| Non-initiating party | `PENDING → REJECTED` |\n\nReturns **403** if the caller is the initiating party.\nReturns **422** for any invalid transition.\n"
+            "description": "Removes the client-therapist relationship entirely. `journalAccessStatus` is automatically set to `REVOKED` before deletion. Either party in the mapping may initiate deletion. Attempting to delete a mapping you are not part of returns 403.\n"
           },
           "response": [
             {
-              "name": "Mapping status updated successfully.",
+              "name": "Mapping deleted successfully.",
               "originalRequest": {
-                "method": "PATCH",
+                "method": "DELETE",
                 "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
                   {
                     "description": "Added as a part of security scheme: bearer",
                     "key": "Authorization",
                     "value": "Bearer <token>"
                   }
                 ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
                 "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "raw": "{{baseUrl}}/mappings/:mappingId",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "mappings",
-                    ":mappingId",
-                    "mapping-status"
+                    ":mappingId"
                   ],
                   "variable": [
                     {
@@ -1983,87 +1701,18 @@
                   ]
                 }
               },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "text",
+              "header": [],
               "cookie": [],
-              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"PENDING\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"THERAPIST\",\n  \"createdAt\": \"1970-03-31T01:09:52.752Z\",\n  \"updatedAt\": \"1986-11-23T19:45:23.578Z\"\n}"
-            },
-            {
-              "name": "400 – Bad Request: missing or invalid request parameters.",
-              "originalRequest": {
-                "method": "PATCH",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId",
-                    "mapping-status"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "Bad Request",
-              "code": 400,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"BAD_REQUEST\",\n  \"message\": \"Required field 'email' is missing or has an invalid format.\",\n  \"details\": {\n    \"field\": \"email\",\n    \"reason\": \"must be a valid email address\"\n  }\n}"
+              "body": ""
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
               "originalRequest": {
-                "method": "PATCH",
+                "method": "DELETE",
                 "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
                   {
                     "key": "Accept",
                     "value": "application/json"
@@ -2074,25 +1723,14 @@
                     "value": "Bearer <token>"
                   }
                 ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
                 "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "raw": "{{baseUrl}}/mappings/:mappingId",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "mappings",
-                    ":mappingId",
-                    "mapping-status"
+                    ":mappingId"
                   ],
                   "variable": [
                     {
@@ -2118,12 +1756,8 @@
             {
               "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
               "originalRequest": {
-                "method": "PATCH",
+                "method": "DELETE",
                 "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
                   {
                     "key": "Accept",
                     "value": "application/json"
@@ -2134,25 +1768,14 @@
                     "value": "Bearer <token>"
                   }
                 ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
                 "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "raw": "{{baseUrl}}/mappings/:mappingId",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "mappings",
-                    ":mappingId",
-                    "mapping-status"
+                    ":mappingId"
                   ],
                   "variable": [
                     {
@@ -2178,12 +1801,8 @@
             {
               "name": "404 – Not Found: the requested resource does not exist.",
               "originalRequest": {
-                "method": "PATCH",
+                "method": "DELETE",
                 "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
                   {
                     "key": "Accept",
                     "value": "application/json"
@@ -2194,25 +1813,14 @@
                     "value": "Bearer <token>"
                   }
                 ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
                 "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "raw": "{{baseUrl}}/mappings/:mappingId",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "mappings",
-                    ":mappingId",
-                    "mapping-status"
+                    ":mappingId"
                   ],
                   "variable": [
                     {
@@ -2236,74 +1844,10 @@
               "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
             },
             {
-              "name": "422 – Unprocessable Entity: request is syntactically valid but semantically incorrect (e.g. invalid state transition).",
-              "originalRequest": {
-                "method": "PATCH",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "mappings",
-                    ":mappingId",
-                    "mapping-status"
-                  ],
-                  "variable": [
-                    {
-                      "key": "mappingId",
-                      "value": "string",
-                      "description": "Unique identifier of the client-therapist mapping."
-                    }
-                  ]
-                }
-              },
-              "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
-              "code": 422,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"UNPROCESSABLE_ENTITY\",\n  \"message\": \"Invalid status transition: only the non-initiating party may approve a mapping.\"\n}"
-            },
-            {
               "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
               "originalRequest": {
-                "method": "PATCH",
+                "method": "DELETE",
                 "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
                   {
                     "key": "Accept",
                     "value": "application/json"
@@ -2314,25 +1858,14 @@
                     "value": "Bearer <token>"
                   }
                 ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"mappingStatus\": \"PENDING\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
                 "url": {
-                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "raw": "{{baseUrl}}/mappings/:mappingId",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "mappings",
-                    ":mappingId",
-                    "mapping-status"
+                    ":mappingId"
                   ],
                   "variable": [
                     {
@@ -2373,7 +1906,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+              "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -2423,7 +1956,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2460,7 +1993,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"PENDING\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"THERAPIST\",\n  \"createdAt\": \"1970-03-31T01:09:52.752Z\",\n  \"updatedAt\": \"1986-11-23T19:45:23.578Z\"\n}"
+              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"REJECTED\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"CLIENT\",\n  \"createdAt\": \"2024-11-16T19:12:50.873Z\",\n  \"updatedAt\": \"1965-08-23T06:38:33.533Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -2483,7 +2016,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2543,7 +2076,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2603,7 +2136,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2663,7 +2196,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2723,7 +2256,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2783,7 +2316,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"journalAccessStatus\": \"GRANTED\"\n}",
+                  "raw": "{\n  \"journalAccessStatus\": \"REVOKED\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -2823,12 +2356,727 @@
               "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
             }
           ]
+        },
+        {
+          "name": "Approve or reject a mapping request",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mappings",
+                ":mappingId",
+                "mapping-status"
+              ],
+              "variable": [
+                {
+                  "key": "mappingId",
+                  "value": "string",
+                  "description": "Unique identifier of the client-therapist mapping."
+                }
+              ]
+            },
+            "description": "Only the **non-initiating party** may call this endpoint.\nUsed to approve or reject a PENDING mapping request.\n\n| Caller | From → To |\n|---|---|\n| Non-initiating party | `PENDING → APPROVED` |\n| Non-initiating party | `PENDING → REJECTED` |\n\nReturns **403** if the caller is the initiating party.\nReturns **422** for any invalid transition.\n"
+          },
+          "response": [
+            {
+              "name": "Mapping status updated successfully.",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"mappingId\": \"map_def456\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"mappingStatus\": \"REJECTED\",\n  \"journalAccessStatus\": \"REVOKED\",\n  \"initiatedBy\": \"CLIENT\",\n  \"createdAt\": \"2024-11-16T19:12:50.873Z\",\n  \"updatedAt\": \"1965-08-23T06:38:33.533Z\"\n}"
+            },
+            {
+              "name": "400 – Bad Request: missing or invalid request parameters.",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"BAD_REQUEST\",\n  \"message\": \"Required field 'email' is missing or has an invalid format.\",\n  \"details\": {\n    \"field\": \"email\",\n    \"reason\": \"must be a valid email address\"\n  }\n}"
+            },
+            {
+              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
+            },
+            {
+              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
+            },
+            {
+              "name": "404 – Not Found: the requested resource does not exist.",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
+            },
+            {
+              "name": "422 – Unprocessable Entity: request is syntactically valid but semantically incorrect (e.g. invalid state transition).",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNPROCESSABLE_ENTITY\",\n  \"message\": \"Invalid status transition: only the non-initiating party may approve a mapping.\"\n}"
+            },
+            {
+              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mappingStatus\": \"APPROVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/mappings/:mappingId/mapping-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mappings",
+                    ":mappingId",
+                    "mapping-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "mappingId",
+                      "value": "string",
+                      "description": "Unique identifier of the client-therapist mapping."
+                    }
+                  ]
+                }
+              },
+              "status": "Internal Server Error",
+              "code": 500,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
+            }
+          ]
         }
       ]
     },
     {
       "name": "messages",
       "item": [
+        {
+          "name": "Delete a message",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/messages/:messageId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "messages",
+                ":messageId"
+              ],
+              "variable": [
+                {
+                  "key": "messageId",
+                  "value": "string",
+                  "description": "Unique identifier of the message."
+                }
+              ]
+            },
+            "description": "Only the **sender** may delete their own message. The recipient cannot delete the other party's message.\n"
+          },
+          "response": [
+            {
+              "name": "Message deleted.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/messages/:messageId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "messages",
+                    ":messageId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "messageId",
+                      "value": "string",
+                      "description": "Unique identifier of the message."
+                    }
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/messages/:messageId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "messages",
+                    ":messageId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "messageId",
+                      "value": "string",
+                      "description": "Unique identifier of the message."
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
+            },
+            {
+              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/messages/:messageId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "messages",
+                    ":messageId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "messageId",
+                      "value": "string",
+                      "description": "Unique identifier of the message."
+                    }
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
+            },
+            {
+              "name": "404 – Not Found: the requested resource does not exist.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/messages/:messageId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "messages",
+                    ":messageId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "messageId",
+                      "value": "string",
+                      "description": "Unique identifier of the message."
+                    }
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
+            },
+            {
+              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/messages/:messageId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "messages",
+                    ":messageId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "messageId",
+                      "value": "string",
+                      "description": "Unique identifier of the message."
+                    }
+                  ]
+                }
+              },
+              "status": "Internal Server Error",
+              "code": 500,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
+            }
+          ]
+        },
         {
           "name": "Send a message",
           "request": {
@@ -2914,7 +3162,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"messageId\": \"msg_mno987\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"senderType\": \"THERAPIST\",\n  \"senderId\": \"cli_abc123\",\n  \"content\": \"I would like to discuss my progress before next session.\",\n  \"sentAt\": \"1976-07-03T19:26:00.906Z\",\n  \"editedAt\": \"2003-12-13T02:52:11.764Z\"\n}"
+              "body": "{\n  \"messageId\": \"msg_mno987\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"senderType\": \"THERAPIST\",\n  \"senderId\": \"cli_abc123\",\n  \"content\": \"I would like to discuss my progress before next session.\",\n  \"sentAt\": \"1987-12-06T23:43:28.289Z\",\n  \"editedAt\": \"1947-07-18T06:57:02.845Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -3274,7 +3522,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"items\": [\n    {\n      \"messageId\": \"msg_mno987\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"senderType\": \"CLIENT\",\n      \"senderId\": \"cli_abc123\",\n      \"content\": \"I would like to discuss my progress before next session.\",\n      \"sentAt\": \"2007-11-16T21:52:57.193Z\",\n      \"editedAt\": \"1997-04-21T10:32:13.866Z\"\n    },\n    {\n      \"messageId\": \"msg_mno987\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"senderType\": \"THERAPIST\",\n      \"senderId\": \"cli_abc123\",\n      \"content\": \"I would like to discuss my progress before next session.\",\n      \"sentAt\": \"1968-03-19T20:05:20.576Z\",\n      \"editedAt\": \"1992-09-13T19:27:38.100Z\"\n    }\n  ],\n  \"total\": 69,\n  \"page\": 4391,\n  \"pageSize\": 6596\n}"
+              "body": "{\n  \"items\": [\n    {\n      \"messageId\": \"msg_mno987\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"senderType\": \"THERAPIST\",\n      \"senderId\": \"cli_abc123\",\n      \"content\": \"I would like to discuss my progress before next session.\",\n      \"sentAt\": \"2020-09-08T15:45:20.705Z\",\n      \"editedAt\": \"1955-02-08T03:37:52.698Z\"\n    },\n    {\n      \"messageId\": \"msg_mno987\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"senderType\": \"CLIENT\",\n      \"senderId\": \"cli_abc123\",\n      \"content\": \"I would like to discuss my progress before next session.\",\n      \"sentAt\": \"1959-08-28T19:15:38.885Z\",\n      \"editedAt\": \"2020-03-09T02:02:30.195Z\"\n    }\n  ],\n  \"total\": 7139,\n  \"page\": 410,\n  \"pageSize\": 1003\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -3515,254 +3763,6 @@
           ]
         },
         {
-          "name": "Delete a message",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/messages/:messageId",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "messages",
-                ":messageId"
-              ],
-              "variable": [
-                {
-                  "key": "messageId",
-                  "value": "string",
-                  "description": "Unique identifier of the message."
-                }
-              ]
-            },
-            "description": "Only the **sender** may delete their own message. The recipient cannot delete the other party's message.\n"
-          },
-          "response": [
-            {
-              "name": "Message deleted.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/messages/:messageId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "messages",
-                    ":messageId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "messageId",
-                      "value": "string",
-                      "description": "Unique identifier of the message."
-                    }
-                  ]
-                }
-              },
-              "status": "No Content",
-              "code": 204,
-              "_postman_previewlanguage": "text",
-              "header": [],
-              "cookie": [],
-              "body": ""
-            },
-            {
-              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/messages/:messageId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "messages",
-                    ":messageId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "messageId",
-                      "value": "string",
-                      "description": "Unique identifier of the message."
-                    }
-                  ]
-                }
-              },
-              "status": "Unauthorized",
-              "code": 401,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
-            },
-            {
-              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/messages/:messageId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "messages",
-                    ":messageId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "messageId",
-                      "value": "string",
-                      "description": "Unique identifier of the message."
-                    }
-                  ]
-                }
-              },
-              "status": "Forbidden",
-              "code": 403,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
-            },
-            {
-              "name": "404 – Not Found: the requested resource does not exist.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/messages/:messageId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "messages",
-                    ":messageId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "messageId",
-                      "value": "string",
-                      "description": "Unique identifier of the message."
-                    }
-                  ]
-                }
-              },
-              "status": "Not Found",
-              "code": 404,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
-            },
-            {
-              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/messages/:messageId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "messages",
-                    ":messageId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "messageId",
-                      "value": "string",
-                      "description": "Unique identifier of the message."
-                    }
-                  ]
-                }
-              },
-              "status": "Internal Server Error",
-              "code": 500,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
-            }
-          ]
-        },
-        {
           "name": "Update a specific message",
           "request": {
             "method": "PUT",
@@ -3863,7 +3863,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"messageId\": \"msg_mno987\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"senderType\": \"THERAPIST\",\n  \"senderId\": \"cli_abc123\",\n  \"content\": \"I would like to discuss my progress before next session.\",\n  \"sentAt\": \"1976-07-03T19:26:00.906Z\",\n  \"editedAt\": \"2003-12-13T02:52:11.764Z\"\n}"
+              "body": "{\n  \"messageId\": \"msg_mno987\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"senderType\": \"THERAPIST\",\n  \"senderId\": \"cli_abc123\",\n  \"content\": \"I would like to discuss my progress before next session.\",\n  \"sentAt\": \"1987-12-06T23:43:28.289Z\",\n  \"editedAt\": \"1947-07-18T06:57:02.845Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -4168,254 +4168,6 @@
       "name": "sessions",
       "item": [
         {
-          "name": "Delete a session",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/sessions/:sessionId",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "sessions",
-                ":sessionId"
-              ],
-              "variable": [
-                {
-                  "key": "sessionId",
-                  "value": "string",
-                  "description": "Unique identifier of the session."
-                }
-              ]
-            },
-            "description": "Only the therapist who owns the session may delete it. All PENDING or CONFIRMED appointments for this session are automatically CANCELLED.\n"
-          },
-          "response": [
-            {
-              "name": "Session deleted.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/sessions/:sessionId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "sessions",
-                    ":sessionId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "sessionId",
-                      "value": "string",
-                      "description": "Unique identifier of the session."
-                    }
-                  ]
-                }
-              },
-              "status": "No Content",
-              "code": 204,
-              "_postman_previewlanguage": "text",
-              "header": [],
-              "cookie": [],
-              "body": ""
-            },
-            {
-              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/sessions/:sessionId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "sessions",
-                    ":sessionId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "sessionId",
-                      "value": "string",
-                      "description": "Unique identifier of the session."
-                    }
-                  ]
-                }
-              },
-              "status": "Unauthorized",
-              "code": 401,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
-            },
-            {
-              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/sessions/:sessionId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "sessions",
-                    ":sessionId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "sessionId",
-                      "value": "string",
-                      "description": "Unique identifier of the session."
-                    }
-                  ]
-                }
-              },
-              "status": "Forbidden",
-              "code": 403,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
-            },
-            {
-              "name": "404 – Not Found: the requested resource does not exist.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/sessions/:sessionId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "sessions",
-                    ":sessionId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "sessionId",
-                      "value": "string",
-                      "description": "Unique identifier of the session."
-                    }
-                  ]
-                }
-              },
-              "status": "Not Found",
-              "code": 404,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
-            },
-            {
-              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/sessions/:sessionId",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "sessions",
-                    ":sessionId"
-                  ],
-                  "variable": [
-                    {
-                      "key": "sessionId",
-                      "value": "string",
-                      "description": "Unique identifier of the session."
-                    }
-                  ]
-                }
-              },
-              "status": "Internal Server Error",
-              "code": 500,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
-            }
-          ]
-        },
-        {
           "name": "Create a new session slot",
           "request": {
             "method": "POST",
@@ -4431,7 +4183,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1965-08-18T19:29:47.004Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
+              "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1980-12-25T03:26:06.542Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -4472,7 +4224,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1965-08-18T19:29:47.004Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
+                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1980-12-25T03:26:06.542Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4500,7 +4252,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"1975-12-07T07:15:58.170Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"SCHEDULED\",\n  \"startedAt\": \"1953-09-05T18:51:44.158Z\",\n  \"endedAt\": \"1969-02-08T14:09:34.469Z\",\n  \"createdAt\": \"2005-12-06T23:43:45.158Z\",\n  \"updatedAt\": \"2002-02-19T19:58:07.572Z\"\n}"
+              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"2022-05-22T18:57:45.104Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"CANCELLED\",\n  \"startedAt\": \"1961-06-16T06:45:22.727Z\",\n  \"endedAt\": \"2013-04-22T22:16:04.821Z\",\n  \"createdAt\": \"1990-11-06T07:30:36.398Z\",\n  \"updatedAt\": \"1958-02-10T10:22:44.142Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -4523,7 +4275,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1965-08-18T19:29:47.004Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
+                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1980-12-25T03:26:06.542Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4574,7 +4326,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1965-08-18T19:29:47.004Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
+                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1980-12-25T03:26:06.542Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4625,7 +4377,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1965-08-18T19:29:47.004Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
+                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1980-12-25T03:26:06.542Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4676,7 +4428,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1965-08-18T19:29:47.004Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
+                  "raw": "{\n  \"title\": \"Weekly Check-In\",\n  \"scheduledAt\": \"1980-12-25T03:26:06.542Z\",\n  \"durationMinutes\": 60,\n  \"description\": \"General well-being and progress review.\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4719,7 +4471,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1952-09-06&toDate=1952-09-06&page=1&pageSize=20",
+              "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1964-12-03&toDate=1964-12-03&page=1&pageSize=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -4730,21 +4482,21 @@
                 {
                   "key": "therapistId",
                   "value": "string",
-                  "description": "Filter by therapist (optional for clients; ignored for therapists — they always see their own)."
+                  "description": "**Client only.** Filter sessions to a specific therapist's slots. Ignored for therapist callers — they always see their own sessions.\n"
                 },
                 {
                   "key": "isAvailable",
                   "value": "false",
-                  "description": "Filter by availability. Defaults to `true` for clients; no default for therapists."
+                  "description": "**Therapist only.** Filter by slot availability. When omitted, all sessions are returned. Ignored for client callers — availability is always enforced as `true` for clients.\n"
                 },
                 {
                   "key": "fromDate",
-                  "value": "1952-09-06",
+                  "value": "1964-12-03",
                   "description": "Include only sessions scheduled on or after this date."
                 },
                 {
                   "key": "toDate",
-                  "value": "1952-09-06",
+                  "value": "1964-12-03",
                   "description": "Include only sessions scheduled on or before this date."
                 },
                 {
@@ -4759,7 +4511,7 @@
                 }
               ]
             },
-            "description": "- **Client**: Returns available sessions (`isAvailable: true`) across all therapists.\n  May filter by `therapistId` to narrow to a specific therapist's slots.\n- **Therapist**: Returns only sessions they own (all, not just available ones).\n"
+            "description": "Returns a paginated list of sessions scoped to the caller's role.\n\n**Client** — always returns only sessions where `isAvailable = true`.\nAccepted filters: `therapistId`, `fromDate`, `toDate`, `page`, `pageSize`.\nThe `isAvailable` parameter is **ignored** for clients — availability is always enforced.\n\n**Therapist** — returns only sessions created by the calling therapist.\nAccepted filters: `isAvailable`, `fromDate`, `toDate`, `page`, `pageSize`.\nThe `therapistId` parameter is **ignored** for therapists — they always see their own sessions.\nOmitting `isAvailable` returns all sessions regardless of availability.\n"
           },
           "response": [
             {
@@ -4778,7 +4530,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1952-09-06&toDate=1952-09-06&page=1&pageSize=20",
+                  "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1964-12-03&toDate=1964-12-03&page=1&pageSize=20",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -4787,24 +4539,24 @@
                   ],
                   "query": [
                     {
-                      "description": "Filter by therapist (optional for clients; ignored for therapists — they always see their own).",
+                      "description": "**Client only.** Filter sessions to a specific therapist's slots. Ignored for therapist callers — they always see their own sessions.\n",
                       "key": "therapistId",
                       "value": "string"
                     },
                     {
-                      "description": "Filter by availability. Defaults to `true` for clients; no default for therapists.",
+                      "description": "**Therapist only.** Filter by slot availability. When omitted, all sessions are returned. Ignored for client callers — availability is always enforced as `true` for clients.\n",
                       "key": "isAvailable",
                       "value": "false"
                     },
                     {
                       "description": "Include only sessions scheduled on or after this date.",
                       "key": "fromDate",
-                      "value": "1952-09-06"
+                      "value": "1964-12-03"
                     },
                     {
                       "description": "Include only sessions scheduled on or before this date.",
                       "key": "toDate",
-                      "value": "1952-09-06"
+                      "value": "1964-12-03"
                     },
                     {
                       "description": "Page number for pagination (1-indexed).",
@@ -4829,7 +4581,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"items\": [\n    {\n      \"sessionId\": \"ses_pqr111\",\n      \"therapistId\": \"thr_xyz789\",\n      \"title\": \"Weekly Check-In\",\n      \"description\": \"General well-being and progress review.\",\n      \"scheduledAt\": \"1959-06-20T23:10:25.282Z\",\n      \"durationMinutes\": 60,\n      \"isAvailable\": true,\n      \"status\": \"IN_PROGRESS\",\n      \"startedAt\": \"1996-03-27T22:33:42.210Z\",\n      \"endedAt\": \"1951-08-11T13:52:53.676Z\",\n      \"createdAt\": \"1977-02-23T20:18:35.336Z\",\n      \"updatedAt\": \"1950-08-24T08:10:40.216Z\"\n    },\n    {\n      \"sessionId\": \"ses_pqr111\",\n      \"therapistId\": \"thr_xyz789\",\n      \"title\": \"Weekly Check-In\",\n      \"description\": \"General well-being and progress review.\",\n      \"scheduledAt\": \"1979-08-18T12:19:11.766Z\",\n      \"durationMinutes\": 60,\n      \"isAvailable\": true,\n      \"status\": \"CANCELLED\",\n      \"startedAt\": \"1968-07-30T10:55:41.729Z\",\n      \"endedAt\": \"2010-06-14T11:22:25.201Z\",\n      \"createdAt\": \"1993-09-09T10:23:49.174Z\",\n      \"updatedAt\": \"1964-08-25T01:01:58.291Z\"\n    }\n  ],\n  \"total\": 2129,\n  \"page\": 1666,\n  \"pageSize\": 1994\n}"
+              "body": "{\n  \"items\": [\n    {\n      \"sessionId\": \"ses_pqr111\",\n      \"therapistId\": \"thr_xyz789\",\n      \"title\": \"Weekly Check-In\",\n      \"description\": \"General well-being and progress review.\",\n      \"scheduledAt\": \"1964-09-23T13:09:48.610Z\",\n      \"durationMinutes\": 60,\n      \"isAvailable\": true,\n      \"status\": \"COMPLETED\",\n      \"startedAt\": \"1999-10-28T15:19:47.044Z\",\n      \"endedAt\": \"2002-03-11T01:26:07.506Z\",\n      \"createdAt\": \"1979-11-15T10:47:28.507Z\",\n      \"updatedAt\": \"1947-06-27T14:41:09.146Z\"\n    },\n    {\n      \"sessionId\": \"ses_pqr111\",\n      \"therapistId\": \"thr_xyz789\",\n      \"title\": \"Weekly Check-In\",\n      \"description\": \"General well-being and progress review.\",\n      \"scheduledAt\": \"1967-02-09T01:28:47.583Z\",\n      \"durationMinutes\": 60,\n      \"isAvailable\": true,\n      \"status\": \"IN_PROGRESS\",\n      \"startedAt\": \"1975-08-20T00:52:03.155Z\",\n      \"endedAt\": \"2002-09-21T15:57:17.723Z\",\n      \"createdAt\": \"2013-10-07T00:50:19.019Z\",\n      \"updatedAt\": \"1976-12-25T13:48:51.187Z\"\n    }\n  ],\n  \"total\": 8590,\n  \"page\": 6601,\n  \"pageSize\": 3735\n}"
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
@@ -4847,7 +4599,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1952-09-06&toDate=1952-09-06&page=1&pageSize=20",
+                  "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1964-12-03&toDate=1964-12-03&page=1&pageSize=20",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -4856,24 +4608,24 @@
                   ],
                   "query": [
                     {
-                      "description": "Filter by therapist (optional for clients; ignored for therapists — they always see their own).",
+                      "description": "**Client only.** Filter sessions to a specific therapist's slots. Ignored for therapist callers — they always see their own sessions.\n",
                       "key": "therapistId",
                       "value": "string"
                     },
                     {
-                      "description": "Filter by availability. Defaults to `true` for clients; no default for therapists.",
+                      "description": "**Therapist only.** Filter by slot availability. When omitted, all sessions are returned. Ignored for client callers — availability is always enforced as `true` for clients.\n",
                       "key": "isAvailable",
                       "value": "false"
                     },
                     {
                       "description": "Include only sessions scheduled on or after this date.",
                       "key": "fromDate",
-                      "value": "1952-09-06"
+                      "value": "1964-12-03"
                     },
                     {
                       "description": "Include only sessions scheduled on or before this date.",
                       "key": "toDate",
-                      "value": "1952-09-06"
+                      "value": "1964-12-03"
                     },
                     {
                       "description": "Page number for pagination (1-indexed).",
@@ -4916,7 +4668,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1952-09-06&toDate=1952-09-06&page=1&pageSize=20",
+                  "raw": "{{baseUrl}}/sessions?therapistId=string&isAvailable=false&fromDate=1964-12-03&toDate=1964-12-03&page=1&pageSize=20",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -4925,24 +4677,24 @@
                   ],
                   "query": [
                     {
-                      "description": "Filter by therapist (optional for clients; ignored for therapists — they always see their own).",
+                      "description": "**Client only.** Filter sessions to a specific therapist's slots. Ignored for therapist callers — they always see their own sessions.\n",
                       "key": "therapistId",
                       "value": "string"
                     },
                     {
-                      "description": "Filter by availability. Defaults to `true` for clients; no default for therapists.",
+                      "description": "**Therapist only.** Filter by slot availability. When omitted, all sessions are returned. Ignored for client callers — availability is always enforced as `true` for clients.\n",
                       "key": "isAvailable",
                       "value": "false"
                     },
                     {
                       "description": "Include only sessions scheduled on or after this date.",
                       "key": "fromDate",
-                      "value": "1952-09-06"
+                      "value": "1964-12-03"
                     },
                     {
                       "description": "Include only sessions scheduled on or before this date.",
                       "key": "toDate",
-                      "value": "1952-09-06"
+                      "value": "1964-12-03"
                     },
                     {
                       "description": "Page number for pagination (1-indexed).",
@@ -4998,7 +4750,7 @@
                 }
               ]
             },
-            "description": "- **Client**: May view any session. Private notes are **never** included in\n  the client response.\n- **Therapist**: May only view sessions they own. Returns 403 for other therapists' sessions.\n"
+            "description": "- **Client**: May view the session only if `isAvailable=true` OR the client has\n  an active appointment for that session. Private notes are **never** included in\n  the client response.\n- **Therapist**: May only view sessions they own. Returns 403 for other therapists' sessions.\n"
           },
           "response": [
             {
@@ -5044,7 +4796,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"1975-12-07T07:15:58.170Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"SCHEDULED\",\n  \"startedAt\": \"1953-09-05T18:51:44.158Z\",\n  \"endedAt\": \"1969-02-08T14:09:34.469Z\",\n  \"createdAt\": \"2005-12-06T23:43:45.158Z\",\n  \"updatedAt\": \"2002-02-19T19:58:07.572Z\"\n}"
+              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"2022-05-22T18:57:45.104Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"CANCELLED\",\n  \"startedAt\": \"1961-06-16T06:45:22.727Z\",\n  \"endedAt\": \"2013-04-22T22:16:04.821Z\",\n  \"createdAt\": \"1990-11-06T07:30:36.398Z\",\n  \"updatedAt\": \"1958-02-10T10:22:44.142Z\"\n}"
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
@@ -5185,6 +4937,299 @@
               "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
               "originalRequest": {
                 "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Internal Server Error",
+              "code": 500,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete a session",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionId"
+              ],
+              "variable": [
+                {
+                  "key": "sessionId",
+                  "value": "string",
+                  "description": "Unique identifier of the session."
+                }
+              ]
+            },
+            "description": "Only the therapist who owns the session may delete it.\nDeletion is allowed only when session status is `SCHEDULED`.\n"
+          },
+          "response": [
+            {
+              "name": "Session deleted.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "400 – Bad Request: missing or invalid request parameters.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"BAD_REQUEST\",\n  \"message\": \"Required field 'email' is missing or has an invalid format.\",\n  \"details\": {\n    \"field\": \"email\",\n    \"reason\": \"must be a valid email address\"\n  }\n}"
+            },
+            {
+              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
+            },
+            {
+              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
+            },
+            {
+              "name": "404 – Not Found: the requested resource does not exist.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
+            },
+            {
+              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
+              "originalRequest": {
+                "method": "DELETE",
                 "header": [
                   {
                     "key": "Accept",
@@ -5244,7 +5289,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+              "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -5269,7 +5314,7 @@
                 }
               ]
             },
-            "description": "Only the therapist who owns the session may modify it. Returns 403 for any other caller.\n"
+            "description": "Only the therapist who owns the session may modify it.\n`scheduledAt` cannot be changed once session status is any of:\n`CONFIRMED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`.\nReturns 403 for any other caller.\n"
           },
           "response": [
             {
@@ -5293,7 +5338,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -5329,7 +5374,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"1975-12-07T07:15:58.170Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"SCHEDULED\",\n  \"startedAt\": \"1953-09-05T18:51:44.158Z\",\n  \"endedAt\": \"1969-02-08T14:09:34.469Z\",\n  \"createdAt\": \"2005-12-06T23:43:45.158Z\",\n  \"updatedAt\": \"2002-02-19T19:58:07.572Z\"\n}"
+              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"2022-05-22T18:57:45.104Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"CANCELLED\",\n  \"startedAt\": \"1961-06-16T06:45:22.727Z\",\n  \"endedAt\": \"2013-04-22T22:16:04.821Z\",\n  \"createdAt\": \"1990-11-06T07:30:36.398Z\",\n  \"updatedAt\": \"1958-02-10T10:22:44.142Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -5352,7 +5397,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -5411,7 +5456,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -5470,7 +5515,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -5529,7 +5574,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -5588,7 +5633,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2009-01-15T14:17:30.496Z\",\n  \"durationMinutes\": 3118,\n  \"isAvailable\": true\n}",
+                  "raw": "{\n  \"title\": \"string\",\n  \"description\": \"string\",\n  \"scheduledAt\": \"2021-10-27T09:54:22.556Z\",\n  \"durationMinutes\": 7299\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -5666,7 +5711,7 @@
                 "appointments"
               ]
             },
-            "description": "**Client only.** Creates a PENDING appointment for an available session.\n**Preconditions** (any failure returns the noted code): - Session must exist and `isAvailable: true` → 422 if unavailable. - An APPROVED mapping must exist between the client and the session's therapist → 403 if not. - Client must not already have an appointment for this session → 409 if duplicate.\n"
+            "description": "**Client only.** Creates a PENDING appointment for an available session.\n\n**Preconditions** (any failure returns the noted code):\n- Session must exist and `isAvailable: true` → 422 if unavailable.\n- Client must not already have an appointment for this session → 409 if duplicate.\n"
           },
           "response": [
             {
@@ -5718,7 +5763,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"appointmentId\": \"apt_stu222\",\n  \"sessionId\": \"ses_pqr111\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"status\": \"CONFIRMED\",\n  \"requestedAt\": \"1979-11-05T22:15:27.751Z\",\n  \"updatedAt\": \"1988-05-15T23:04:40.687Z\"\n}"
+              "body": "{\n  \"appointmentId\": \"apt_stu222\",\n  \"sessionId\": \"ses_pqr111\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"status\": \"CONFIRMED\",\n  \"requestedAt\": \"1967-10-07T11:42:14.180Z\",\n  \"updatedAt\": \"1971-08-28T00:54:13.514Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -5821,57 +5866,6 @@
               ],
               "cookie": [],
               "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
-            },
-            {
-              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
-              "originalRequest": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  },
-                  {
-                    "key": "Accept",
-                    "value": "application/json"
-                  },
-                  {
-                    "description": "Added as a part of security scheme: bearer",
-                    "key": "Authorization",
-                    "value": "Bearer <token>"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"sessionId\": \"ses_pqr111\"\n}",
-                  "options": {
-                    "raw": {
-                      "headerFamily": "json",
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{baseUrl}}/appointments",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "appointments"
-                  ]
-                }
-              },
-              "status": "Forbidden",
-              "code": 403,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                }
-              ],
-              "cookie": [],
-              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
             },
             {
               "name": "404 – Not Found: the requested resource does not exist.",
@@ -6180,7 +6174,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"items\": [\n    {\n      \"appointmentId\": \"apt_stu222\",\n      \"sessionId\": \"ses_pqr111\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"status\": \"PENDING\",\n      \"requestedAt\": \"2003-09-14T23:15:01.379Z\",\n      \"updatedAt\": \"1954-04-06T10:03:33.700Z\"\n    },\n    {\n      \"appointmentId\": \"apt_stu222\",\n      \"sessionId\": \"ses_pqr111\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"status\": \"CONFIRMED\",\n      \"requestedAt\": \"1958-04-14T01:52:21.009Z\",\n      \"updatedAt\": \"2017-03-16T05:56:04.148Z\"\n    }\n  ],\n  \"total\": 5066,\n  \"page\": 1632,\n  \"pageSize\": 1517\n}"
+              "body": "{\n  \"items\": [\n    {\n      \"appointmentId\": \"apt_stu222\",\n      \"sessionId\": \"ses_pqr111\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"status\": \"REJECTED\",\n      \"requestedAt\": \"1948-08-31T04:00:07.588Z\",\n      \"updatedAt\": \"1952-03-25T20:31:29.552Z\"\n    },\n    {\n      \"appointmentId\": \"apt_stu222\",\n      \"sessionId\": \"ses_pqr111\",\n      \"clientId\": \"cli_abc123\",\n      \"therapistId\": \"thr_xyz789\",\n      \"status\": \"COMPLETED\",\n      \"requestedAt\": \"1986-08-18T18:27:19.878Z\",\n      \"updatedAt\": \"1979-11-28T10:53:00.513Z\"\n    }\n  ],\n  \"total\": 4012,\n  \"page\": 4609,\n  \"pageSize\": 142\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -6552,7 +6546,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"appointmentId\": \"apt_stu222\",\n  \"sessionId\": \"ses_pqr111\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"status\": \"CONFIRMED\",\n  \"requestedAt\": \"1979-11-05T22:15:27.751Z\",\n  \"updatedAt\": \"1988-05-15T23:04:40.687Z\"\n}"
+              "body": "{\n  \"appointmentId\": \"apt_stu222\",\n  \"sessionId\": \"ses_pqr111\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"status\": \"CONFIRMED\",\n  \"requestedAt\": \"1967-10-07T11:42:14.180Z\",\n  \"updatedAt\": \"1971-08-28T00:54:13.514Z\"\n}"
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
@@ -6777,7 +6771,7 @@
                 }
               ]
             },
-            "description": "Drives the appointment state machine. See `PatchAppointmentRequest` schema for the full allowed transition table. Invalid transitions or calls by the wrong party return 422 or 403 respectively.\n"
+            "description": "Drives the appointment state machine. See `PatchAppointmentRequest` schema\nfor the full allowed transition table.\n\nFor `CONFIRMED → CANCELLED`, cancellation is valid only before session start:\n- therapist cancellation sets session status to `CANCELLED`\n- client cancellation re-opens the session as `SCHEDULED` with `isAvailable=true`\n\nInvalid transitions or calls by the wrong party return 422 or 403 respectively.\n"
           },
           "response": [
             {
@@ -6837,7 +6831,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"appointmentId\": \"apt_stu222\",\n  \"sessionId\": \"ses_pqr111\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"status\": \"CONFIRMED\",\n  \"requestedAt\": \"1979-11-05T22:15:27.751Z\",\n  \"updatedAt\": \"1988-05-15T23:04:40.687Z\"\n}"
+              "body": "{\n  \"appointmentId\": \"apt_stu222\",\n  \"sessionId\": \"ses_pqr111\",\n  \"clientId\": \"cli_abc123\",\n  \"therapistId\": \"thr_xyz789\",\n  \"status\": \"CONFIRMED\",\n  \"requestedAt\": \"1967-10-07T11:42:14.180Z\",\n  \"updatedAt\": \"1971-08-28T00:54:13.514Z\"\n}"
             },
             {
               "name": "400 – Bad Request: missing or invalid request parameters.",
@@ -7222,7 +7216,7 @@
                 }
               ]
             },
-            "description": "Hard-deletes the appointment record. Only the client who requested it or the therapist who owns the session may delete it. Use `PATCH` to update status to CANCELLED if you want to preserve history.\n"
+            "description": "Hard-deletes the appointment record. Only the client who requested it or\nthe therapist who owns the session may delete it.\nDeletion is allowed only when appointment status is `PENDING` or `REJECTED`.\nUse `PATCH` to update status to CANCELLED if you want to preserve history.\n"
           },
           "response": [
             {
@@ -7260,6 +7254,51 @@
               "header": [],
               "cookie": [],
               "body": ""
+            },
+            {
+              "name": "400 – Bad Request: missing or invalid request parameters.",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/appointments/:appointmentId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "appointments",
+                    ":appointmentId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "appointmentId",
+                      "value": "string",
+                      "description": "Unique identifier of the appointment."
+                    }
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"BAD_REQUEST\",\n  \"message\": \"Required field 'email' is missing or has an invalid format.\",\n  \"details\": {\n    \"field\": \"email\",\n    \"reason\": \"must be a valid email address\"\n  }\n}"
             },
             {
               "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",

@@ -670,12 +670,11 @@ ACCESS_PATTERNS
 
 ACCESS_PATTERNS
   API         DELETE /sessions/{sessionId}
-  OPERATION   TransactWriteItems
-  INDEX       SessionTable + AppointmentTable
+  OPERATION   DeleteItem
+  INDEX       SessionTable
   KEYS        sessionId = :sessionId
-  NOTES       1. DeleteItem session.
-              2. Query GSI_SessionAppointments for all appointments on this session.
-              3. BatchWriteItem to set all PENDING/CONFIRMED appointments to CANCELLED.
+  NOTES       Hard delete by session owner only.
+              Allowed only when session status is SCHEDULED.
 
 ACCESS_PATTERNS
   API         POST /sessions/{sessionId}/start
@@ -739,7 +738,7 @@ TABLE AppointmentTable
 
 DESCRIPTION
   Stores appointment requests from clients for therapist session slots
-  Four GSIs cover every access pattern. GSI_ClientAppointments and GSI_TherapistAppointments support paginated list views. GSI_SessionAppointments groups appointments by session and status — critical for confirming one and batch-rejecting others atomically. GSI_ClientSessionDedup uses composite key clientId#sessionId for O(1) duplicate prevention with KEYS_ONLY projection to minimise read cost. The CONFIRM transition is the most complex write: a TransactWriteItems call confirms the target, batch-rejects all other PENDING appointments for the same session, and flips isAvailable=false on SessionTable.
+  Four GSIs cover every access pattern. GSI_ClientAppointments and GSI_TherapistAppointments support paginated list views. GSI_SessionAppointments groups appointments by session and status — critical for confirming one and batch-rejecting others. GSI_ClientSessionDedup uses composite key clientId#sessionId for O(1) duplicate prevention with KEYS_ONLY projection to minimise read cost. The CONFIRM transition is the most complex write: sequential updates confirm the target, reject all other PENDING appointments for the same session, and flip isAvailable=false on SessionTable.
 
 ATTRIBUTES
   appointmentId   String    PK      Unique appointment ID. Natural partition key. No prefix needed — single entity type
@@ -778,7 +777,6 @@ GSI
   DESCRIPTION Groups appointments by session and status. Used for:
               1. POST /sessions/{id}/start — verify CONFIRMED appointment exists.
               2. PATCH CONFIRM — find all PENDING to batch-reject.
-              3. DELETE /sessions/{id} — find all appointments to cancel.
 
 GSI
   NAME        GSI_ClientSessionDedup
@@ -826,14 +824,14 @@ ACCESS_PATTERNS
 
 ACCESS_PATTERNS
   API         PATCH /appointments/{appointmentId} — CONFIRM
-  OPERATION   TransactWriteItems
+  OPERATION   UpdateItem + Query + UpdateItem (sequential)
   INDEX       AppointmentTable + SessionTable
   KEYS        appointmentId = :appointmentId
-  NOTES       ConditionExpression: status=PENDING AND therapistId=:callerId.
-              Atomically: 1. SET status=CONFIRMED on this appointment.
+  NOTES       ConditionExpression validates allowed transition per caller type.
+              Sequentially: 1. SET status=CONFIRMED on this appointment.
               2. Query GSI_SessionAppointments for all other PENDING appointments.
-              3. BatchWriteItem to SET status=REJECTED on all others.
-              4. UpdateItem SessionTable METADATA — SET isAvailable=false.
+              3. SET status=REJECTED on all others.
+              4. UpdateItem SessionTable metadata — SET isAvailable=false, confirmedAppointmentId.
 
 ACCESS_PATTERNS
   API         PATCH /appointments/{appointmentId} — CANCEL/REJECT/COMPLETE
@@ -842,6 +840,9 @@ ACCESS_PATTERNS
   KEYS        appointmentId = :appointmentId
   NOTES       ConditionExpression validates allowed transition per caller type.
               UpdateExpression: SET status=:newStatus, updatedAt=:now.
+              For CONFIRMED→CANCELLED: allowed only before session start.
+              Therapist cancellation sets Session.status=CANCELLED.
+              Client cancellation sets Session.status=SCHEDULED and isAvailable=true.
 
 ACCESS_PATTERNS
   API         DELETE /appointments/{appointmentId}
@@ -849,6 +850,7 @@ ACCESS_PATTERNS
   INDEX       AppointmentTable
   KEYS        appointmentId = :appointmentId
   NOTES       Hard delete. Caller must be clientId or therapistId on the item.
+              Allowed only when appointment status is PENDING or REJECTED.
               Prefer PATCH to CANCELLED status to preserve audit history.
 
 ACCESS_PATTERNS

@@ -43,6 +43,7 @@ info:
     Sessions are created by therapists as bookable slots. The full lifecycle is:
 
     `SCHEDULED` → `IN_PROGRESS` → `COMPLETED`
+    with optional cancellation to `CANCELLED` before completion.
 
     A session can only be started once a client's appointment is `CONFIRMED` and
     the current server time is on or after `scheduledAt`. Starting a session
@@ -154,13 +155,14 @@ components:
 
     AppointmentStatus:
       type: string
-      enum: [PENDING, CONFIRMED, CANCELLED, COMPLETED]
+      enum: [PENDING, CONFIRMED, CANCELLED, COMPLETED, REJECTED]
       description: |
         Lifecycle of a client's appointment request.
         - `PENDING`   – client has requested; awaiting therapist confirmation.
         - `CONFIRMED` – therapist has confirmed the appointment.
         - `CANCELLED` – cancelled by either party.
         - `COMPLETED` – session has taken place.
+        - `REJECTED`  – therapist declined the appointment request.
 
     EmotionIntensity:
       type: string
@@ -777,6 +779,7 @@ components:
           example: 60
         isAvailable:
           type: boolean
+          readOnly: true
           description: Whether this slot is open for new appointment requests.
           example: true
         status:
@@ -824,7 +827,9 @@ components:
 
     UpdateSessionRequest:
       type: object
-      description: All fields are optional; only supplied fields are updated.
+      description: >
+        All fields are optional; only supplied fields are updated.
+        `isAvailable` is server-controlled and cannot be set directly via this API.
       properties:
         title:
           type: string
@@ -836,8 +841,6 @@ components:
         durationMinutes:
           type: integer
           minimum: 15
-        isAvailable:
-          type: boolean
 
     # ---- Session Notes ----------------------------------------
 
@@ -928,7 +931,6 @@ components:
       required: [sessionId]
       description: >
         Only clients can create appointments. The session must have `isAvailable: true`.
-        An APPROVED mapping between the client and the session's therapist must exist.
         Duplicate appointments for the same client/session are rejected with 409.
       properties:
         sessionId:
@@ -944,11 +946,17 @@ components:
         | Caller | From → To |
         |---|---|
         | Therapist | `PENDING → CONFIRMED` |
-        | Therapist | `PENDING → CANCELLED` |
+        | Therapist | `PENDING → REJECTED` |
         | Therapist | `CONFIRMED → CANCELLED` |
         | Therapist | `CONFIRMED → COMPLETED` |
         | Client | `PENDING → CANCELLED` |
         | Client | `CONFIRMED → CANCELLED` |
+
+        Additional cancellation rule for `CONFIRMED → CANCELLED`:
+        - Cancellation is allowed only before the therapist has started the session.
+        - If therapist cancels: appointment becomes `CANCELLED`, session becomes `CANCELLED`,
+          and `confirmedAppointmentId` is cleared.
+        - If client cancels: appointment becomes `CANCELLED`, and session is reset to `SCHEDULED` with `isAvailable=true`.
 
         Any other transition returns **422 Unprocessable Entity**.
       properties:
@@ -2438,7 +2446,8 @@ paths:
       tags: [Sessions]
       summary: Get a session by ID
       description: >
-        - **Client**: May view any session. Private notes are **never** included in
+        - **Client**: May view the session only if `isAvailable=true` OR the client has
+          an active appointment for that session. Private notes are **never** included in
           the client response.
         - **Therapist**: May only view sessions they own. Returns 403 for other therapists' sessions.
       operationId: getSession
@@ -2463,8 +2472,10 @@ paths:
     put:
       tags: [Sessions]
       summary: Update a session
-      description: >
+      description: |
         Only the therapist who owns the session may modify it.
+        `scheduledAt` cannot be changed once session status is any of:
+        `CONFIRMED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`.
         Returns 403 for any other caller.
       operationId: updateSession
       parameters:
@@ -2496,15 +2507,17 @@ paths:
     delete:
       tags: [Sessions]
       summary: Delete a session
-      description: >
+      description: |
         Only the therapist who owns the session may delete it.
-        All PENDING or CONFIRMED appointments for this session are automatically CANCELLED.
+        Deletion is allowed only when session status is `SCHEDULED`.
       operationId: deleteSession
       parameters:
         - $ref: "#/components/parameters/SessionIdPath"
       responses:
         "204":
           description: Session deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2852,10 +2865,15 @@ paths:
     patch:
       tags: [Appointments]
       summary: Update appointment status
-      description: >
+      description: |
         Drives the appointment state machine. See `PatchAppointmentRequest` schema
-        for the full allowed transition table. Invalid transitions or calls by the
-        wrong party return 422 or 403 respectively.
+        for the full allowed transition table.
+
+        For `CONFIRMED → CANCELLED`, cancellation is valid only before session start:
+        - therapist cancellation sets session status to `CANCELLED`
+        - client cancellation re-opens the session as `SCHEDULED` with `isAvailable=true`
+
+        Invalid transitions or calls by the wrong party return 422 or 403 respectively.
       operationId: patchAppointment
       parameters:
         - $ref: "#/components/parameters/AppointmentIdPath"
@@ -2888,9 +2906,10 @@ paths:
     delete:
       tags: [Appointments]
       summary: Delete an appointment
-      description: >
+      description: |
         Hard-deletes the appointment record. Only the client who requested it or
         the therapist who owns the session may delete it.
+        Deletion is allowed only when appointment status is `PENDING` or `REJECTED`.
         Use `PATCH` to update status to CANCELLED if you want to preserve history.
       operationId: deleteAppointment
       parameters:
@@ -2898,6 +2917,8 @@ paths:
       responses:
         "204":
           description: Appointment deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

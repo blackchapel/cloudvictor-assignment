@@ -1,86 +1,65 @@
-# Therapy Journalling API — Swagger UI
+# Therapy Journalling API — OpenAPI Spec and Swagger UI
 
-Interactive API documentation for the Therapy Journalling backend, built with OpenAPI 3.0.
-
----
-
-## Accessing the API Docs
-
-There are four ways to view and interact with the Swagger UI.
+Interactive documentation for the Therapy Journalling backend, defined with OpenAPI 3.0 and served via Swagger UI.
 
 ---
 
-### 1. Live Deployment *(Recommended)*
+## What Is in This Directory
 
-The API docs are publicly hosted on Vercel. No setup required.
+| File | Purpose |
+| --- | --- |
+| `therapy-api.yaml` | OpenAPI 3.0 spec — single source of truth for all API contracts |
+| `index.html` | Swagger UI entry point (works locally and on Vercel) |
+| `README.md` | This file |
 
-🔗 **https://therapy-api-swaggerui.vercel.app**
+The YAML spec also drives the CDK infrastructure: `OpenApiSpecProcessor` reads it at synth time and injects `x-amazon-apigateway-integration` blocks for every implemented route before passing it to API Gateway. Any path in the spec that does not have a Lambda integration gets a 501 mock integration automatically, so the gateway always deploys cleanly.
+
+---
+
+## How to View the API Docs
+
+### Option 1 — Live deployment (recommended)
+
+The spec is publicly hosted on Vercel. No setup required.
+
+**<https://therapy-api-swaggerui.vercel.app>**
 
 Open the link in any browser. The Swagger UI loads instantly with the latest version of the spec.
 
 ---
 
-### 2. Local - Open in Browser
+### Option 2 — Open locally in a browser
 
-For offline access or local development.
+No prerequisites needed — just a browser.
 
-**Prerequisites:** None. Just a browser.
+1. Clone or download this repository.
+2. Navigate to the `swagger/` folder.
+3. Open `index.html` directly in your browser.
 
-**Steps:**
-
-1. Clone or download this repository
-2. Navigate to the project folder
-3. Open `index.html` directly in your browser
-
-> **Note:** When running locally via the file system, the YAML path is resolved
-> relatively (`./therapy-api.yaml`). Both `index.html` and `therapy-api.yaml`
-> must be in the same directory.
+Both `index.html` and `therapy-api.yaml` must be in the same directory, as the HTML file loads the spec from the relative path `./therapy-api.yaml`.
 
 ---
 
-### 3. Swagger Editor Online
+### Option 3 — Swagger Editor online
 
-No installation required. Paste the spec directly into the official Swagger Editor.
+No installation required. Paste the spec directly into the official editor.
 
-**Steps:**
+1. Open <https://editor.swagger.io> in your browser.
+2. Delete the default content in the left panel.
+3. Open `therapy-api.yaml`, copy its entire contents, and paste into the left panel.
+4. The rendered Swagger UI appears instantly on the right.
 
-1. Open [editor.swagger.io](https://editor.swagger.io) in your browser
-2. Delete the default content on the left panel
-3. Open `therapy-api.yaml` from this repository and copy its entire contents
-4. Paste into the left panel of the Swagger Editor
-5. The rendered Swagger UI appears instantly on the right panel
-
-> **Note:** The Swagger Editor also validates your spec in real time and highlights
-> any syntax or schema errors in the left panel as you edit.
+The Swagger Editor also validates the spec in real time and highlights syntax or schema errors in the left panel.
 
 ---
 
-### 4. Docker
+### Option 4 — Docker
 
 Serves the Swagger UI via a local web server on port `8080`.
 
-**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) installed and running.
+**Prerequisite:** [Docker](https://docs.docker.com/get-docker/) installed and running.
 
-**Steps:**
-
-1. Clone or download this repository
-2. Run the following command from the project root, replacing the path with the
-   absolute path to your `therapy-api.yaml` file:
-
-```bash
-docker run -p 8080:8080 \
-  -e SWAGGER_JSON=/tmp/therapy-api.yaml \
-  -v /absolute/path/to/therapy-api.yaml:/tmp/therapy-api.yaml \
-  swaggerapi/swagger-ui
-```
-
-3. Open your browser and navigate to:
-
-```
-http://localhost:8080
-```
-
-**Example on macOS/Linux** (if the file is in your current directory):
+**macOS / Linux:**
 
 ```bash
 docker run -p 8080:8080 \
@@ -89,7 +68,7 @@ docker run -p 8080:8080 \
   swaggerapi/swagger-ui
 ```
 
-**Example on Windows (PowerShell)**:
+**Windows (PowerShell):**
 
 ```powershell
 docker run -p 8080:8080 `
@@ -98,18 +77,27 @@ docker run -p 8080:8080 `
   swaggerapi/swagger-ui
 ```
 
-> To stop the container, press `Ctrl + C` in the terminal.
+Then open <http://localhost:8080> in your browser. Press `Ctrl + C` to stop the container.
 
 ---
 
-## Project Structure
+## API Overview
 
-```
-.
-├── index.html          # Swagger UI entry point
-├── therapy-api.yaml    # OpenAPI 3.0 specification
-└── README.md           # This file
-```
+The spec covers the following resource groups:
+
+| Tag | Routes | Status |
+| --- | --- | --- |
+| Auth | POST /auth/clients/register, POST /auth/therapists/register, POST /auth/login | Implemented |
+| Sessions | CRUD + List `/sessions` | Implemented |
+| Mappings | CRUD + mapping-status + journal-access `/mappings` | Implemented |
+| Messages | Send, List, Update, Delete `/messages` | Implemented |
+| Appointments | Create, List, Get, Patch, Delete `/appointments` | Implemented |
+| Clients | CRUD `/clients` | Spec only (501) |
+| Therapists | CRUD `/therapists` | Spec only (501) |
+| Journal | CRUD `/clients/{id}/journal/entries` | Spec only (501) |
+| Search | GET `/search` | Spec only (501) |
+
+Spec-only routes return `501 Not Implemented` via API Gateway mock integrations and are fully documented with request/response schemas.
 
 ---
 
