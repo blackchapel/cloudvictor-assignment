@@ -42,6 +42,22 @@ public class MappingRepository {
         return Optional.of(itemToMapping(resp.item()));
     }
 
+    /** Returns true if an APPROVED mapping exists between the client and therapist. */
+    public boolean hasApprovedMapping(String clientId, String therapistId) {
+        QueryResponse resp = ddb.query(QueryRequest.builder()
+                .tableName(TABLE)
+                .indexName("GSI_ClientMappings")
+                .keyConditionExpression("clientId = :cid")
+                .filterExpression("therapistId = :tid AND mappingStatus = :approved")
+                .expressionAttributeValues(Map.of(
+                        ":cid",      s(clientId),
+                        ":tid",      s(therapistId),
+                        ":approved", s("APPROVED")))
+                .limit(1)
+                .build());
+        return resp.count() > 0;
+    }
+
     /** Check for any existing mapping between clientId and therapistId. */
     public boolean existsByClientAndTherapist(String clientId, String therapistId) {
         QueryResponse resp = ddb.query(QueryRequest.builder()
