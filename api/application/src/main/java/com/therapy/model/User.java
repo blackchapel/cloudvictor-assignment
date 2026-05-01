@@ -7,7 +7,6 @@ public class User {
     private String email;
     private String passwordHash;
     private String name;
-    private String phoneNumber;
 
     // Therapist-only fields
     private String licenseNumber;

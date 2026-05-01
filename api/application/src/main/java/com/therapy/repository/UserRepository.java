@@ -25,7 +25,6 @@ public class UserRepository {
         item.put("createdAt",    s(user.getCreatedAt()));
         item.put("updatedAt",    s(user.getUpdatedAt()));
 
-        if (user.getPhoneNumber()    != null) item.put("phoneNumber",    s(user.getPhoneNumber()));
         if (user.getLicenseNumber()  != null) item.put("licenseNumber",  s(user.getLicenseNumber()));
         if (user.getSpecialization() != null) item.put("specialization", s(user.getSpecialization()));
         if (user.getBio()            != null) item.put("bio",            s(user.getBio()));
@@ -73,7 +72,6 @@ public class UserRepository {
         u.setEmail(str(item, "email"));
         u.setPasswordHash(str(item, "passwordHash"));
         u.setName(str(item, "name"));
-        u.setPhoneNumber(str(item, "phoneNumber"));
         u.setLicenseNumber(str(item, "licenseNumber"));
         u.setSpecialization(str(item, "specialization"));
         u.setBio(str(item, "bio"));

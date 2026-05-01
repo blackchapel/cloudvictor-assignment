@@ -23,4 +23,8 @@ public class IdGenerator {
     public static String therapistId() {
         return "thr_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
+
+    public static String appointmentId() {
+        return "apt_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    }
 }

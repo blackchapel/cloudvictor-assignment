@@ -8,7 +8,6 @@ public class ClientResponse {
     private String clientId;
     private String email;
     private String name;
-    private String phoneNumber;
     private String createdAt;
     private String updatedAt;
 
@@ -25,7 +24,6 @@ public class ClientResponse {
     public String getClientId()    { return clientId; }
     public String getEmail()       { return email; }
     public String getName()        { return name; }
-    public String getPhoneNumber() { return phoneNumber; }
     public String getCreatedAt()   { return createdAt; }
     public String getUpdatedAt()   { return updatedAt; }
 }
