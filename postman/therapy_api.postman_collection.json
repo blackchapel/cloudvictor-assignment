@@ -5672,6 +5672,624 @@
               "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
             }
           ]
+        },
+        {
+          "name": "Start a session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionId/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionId",
+                "start"
+              ],
+              "variable": [
+                {
+                  "key": "sessionId",
+                  "value": "string",
+                  "description": "Unique identifier of the session."
+                }
+              ]
+            },
+            "description": "**Therapist only (session owner).** Marks the session as `IN_PROGRESS`.\n\n**Preconditions** (checked in order):\n\n| # | Condition | Failure |\n|---|---|---|\n| 1 | Session must exist | 404 |\n| 2 | Caller must be the therapist who created the session | 403 |\n| 3 | Session `status` must be `SCHEDULED` | 422 |\n| 4 | Session must have a `confirmedAppointmentId` (i.e. a CONFIRMED appointment is linked) | 422 |\n| 5 | Current server time must be **on or after** `scheduledAt` | 422 |\n| 6 | Current server time must be **before** `scheduledAt + durationMinutes` (session window must not have passed) | 422 |\n\n**Side effects**:\n- Session `status` → `IN_PROGRESS`\n- Session `startedAt` set to current server timestamp\n- Session `isAvailable` → `false` (if not already)\n\nAll time checks are enforced server-side. A descriptive 422 is returned for preconditions 5 and 6, including `scheduledAt`, `sessionEnd`, and `currentTime` for debugging.\n"
+          },
+          "response": [
+            {
+              "name": "Session started successfully.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"1954-07-05T06:35:31.349Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"SCHEDULED\",\n  \"startedAt\": \"1951-03-31T12:33:32.915Z\",\n  \"endedAt\": \"1987-05-03T08:07:32.166Z\",\n  \"createdAt\": \"1966-03-04T08:06:06.311Z\",\n  \"updatedAt\": \"1977-04-04T03:13:21.865Z\"\n}"
+            },
+            {
+              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
+            },
+            {
+              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
+            },
+            {
+              "name": "404 – Not Found: the requested resource does not exist.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
+            },
+            {
+              "name": "422 – Unprocessable Entity: request is syntactically valid but semantically incorrect (e.g. invalid state transition).",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNPROCESSABLE_ENTITY\",\n  \"message\": \"Invalid status transition: only the non-initiating party may approve a mapping.\"\n}"
+            },
+            {
+              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Internal Server Error",
+              "code": 500,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "End a session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:sessionId/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":sessionId",
+                "end"
+              ],
+              "variable": [
+                {
+                  "key": "sessionId",
+                  "value": "string",
+                  "description": "Unique identifier of the session."
+                }
+              ]
+            },
+            "description": "**Therapist only (session owner).** Marks the session as `COMPLETED`.\n\n**Preconditions** (checked in order):\n\n| # | Condition | Failure |\n|---|---|---|\n| 1 | Session must exist | 404 |\n| 2 | Caller must be the therapist who created the session | 403 |\n| 3 | Session `status` must be `IN_PROGRESS` (session must have been started first) | 422 |\n\n**Side effects**:\n- Session `status` → `COMPLETED`\n- Session `endedAt` set to current server timestamp\n- The linked `CONFIRMED` appointment (`confirmedAppointmentId`) → `COMPLETED`\n\nThe appointment completion is best-effort: if the appointment update fails (e.g. already in a terminal state), the session is still marked `COMPLETED` and the error is logged.\n"
+          },
+          "response": [
+            {
+              "name": "Session ended successfully.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/end",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "end"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"sessionId\": \"ses_pqr111\",\n  \"therapistId\": \"thr_xyz789\",\n  \"title\": \"Weekly Check-In\",\n  \"description\": \"General well-being and progress review.\",\n  \"scheduledAt\": \"1954-07-05T06:35:31.349Z\",\n  \"durationMinutes\": 60,\n  \"isAvailable\": true,\n  \"status\": \"SCHEDULED\",\n  \"startedAt\": \"1951-03-31T12:33:32.915Z\",\n  \"endedAt\": \"1987-05-03T08:07:32.166Z\",\n  \"createdAt\": \"1966-03-04T08:06:06.311Z\",\n  \"updatedAt\": \"1977-04-04T03:13:21.865Z\"\n}"
+            },
+            {
+              "name": "401 – Unauthorized: missing, expired, or invalid JWT token.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/end",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "end"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNAUTHORIZED\",\n  \"message\": \"Authentication token is missing or has expired.\"\n}"
+            },
+            {
+              "name": "403 – Forbidden: caller is authenticated but not permitted to perform this action.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/end",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "end"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"FORBIDDEN\",\n  \"message\": \"You do not have permission to access this resource.\"\n}"
+            },
+            {
+              "name": "404 – Not Found: the requested resource does not exist.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/end",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "end"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"NOT_FOUND\",\n  \"message\": \"The requested resource was not found.\"\n}"
+            },
+            {
+              "name": "422 – Unprocessable Entity: request is syntactically valid but semantically incorrect (e.g. invalid state transition).",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/end",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "end"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"UNPROCESSABLE_ENTITY\",\n  \"message\": \"Invalid status transition: only the non-initiating party may approve a mapping.\"\n}"
+            },
+            {
+              "name": "500 – Internal Server Error: an unexpected server-side error occurred.",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "description": "Added as a part of security scheme: bearer",
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:sessionId/end",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":sessionId",
+                    "end"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionId",
+                      "value": "string",
+                      "description": "Unique identifier of the session."
+                    }
+                  ]
+                }
+              },
+              "status": "Internal Server Error",
+              "code": 500,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"code\": \"INTERNAL_SERVER_ERROR\",\n  \"message\": \"An unexpected error occurred. Please try again later.\"\n}"
+            }
+          ]
         }
       ]
     },

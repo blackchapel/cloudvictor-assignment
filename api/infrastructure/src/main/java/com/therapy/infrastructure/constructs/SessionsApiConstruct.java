@@ -5,14 +5,16 @@ import software.amazon.awscdk.services.lambda.Function;
 import software.constructs.Construct;
 
 /**
- * Creates the five Session Lambda functions and grants DynamoDB permissions.
+ * Creates the seven Session Lambda functions and grants DynamoDB permissions.
  * Route wiring is handled in TherapyApiStack via OpenApiSpecProcessor.
  *
- *   POST   /sessions              → createSession
- *   GET    /sessions              → listSessions
- *   GET    /sessions/{sessionId}  → getSession
- *   PUT    /sessions/{sessionId}  → updateSession
- *   DELETE /sessions/{sessionId}  → deleteSession
+ *   POST   /sessions                      → createSession
+ *   GET    /sessions                      → listSessions
+ *   GET    /sessions/{sessionId}          → getSession
+ *   PUT    /sessions/{sessionId}          → updateSession
+ *   DELETE /sessions/{sessionId}          → deleteSession
+ *   POST   /sessions/{sessionId}/start    → startSession
+ *   POST   /sessions/{sessionId}/end      → endSession
  */
 public class SessionsApiConstruct extends Construct {
 
@@ -21,6 +23,8 @@ public class SessionsApiConstruct extends Construct {
     private final Function getSession;
     private final Function updateSession;
     private final Function deleteSession;
+    private final Function startSession;
+    private final Function endSession;
 
     public SessionsApiConstruct(Construct scope, String id,
                                 LambdaFactory factory,
@@ -38,15 +42,24 @@ public class SessionsApiConstruct extends Construct {
                 "com.therapy.handler.session.UpdateSessionHandler");
         deleteSession = factory.create("DeleteSessionFunction",
                 "com.therapy.handler.session.DeleteSessionHandler");
+        startSession  = factory.create("StartSessionFunction",
+                "com.therapy.handler.session.StartSessionHandler");
+        endSession    = factory.create("EndSessionFunction",
+                "com.therapy.handler.session.EndSessionHandler");
 
         sessionTable.grantReadWriteData(createSession);
         sessionTable.grantReadData(listSessions);
         sessionTable.grantReadData(getSession);
         sessionTable.grantReadWriteData(updateSession);
         sessionTable.grantReadWriteData(deleteSession);
+        sessionTable.grantReadWriteData(startSession);
+        sessionTable.grantReadWriteData(endSession);
 
         // getSession checks appointment table for client access to unavailable sessions
         appointmentTable.grantReadData(getSession);
+
+        // endSession completes the confirmed appointment
+        appointmentTable.grantReadWriteData(endSession);
     }
 
     public Function getCreateSession() { return createSession; }
@@ -54,4 +67,6 @@ public class SessionsApiConstruct extends Construct {
     public Function getGetSession()    { return getSession; }
     public Function getUpdateSession() { return updateSession; }
     public Function getDeleteSession() { return deleteSession; }
+    public Function getStartSession()  { return startSession; }
+    public Function getEndSession()    { return endSession; }
 }

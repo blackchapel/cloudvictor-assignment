@@ -192,6 +192,39 @@ public class SessionRepository {
                 .build());
     }
 
+    /** Transitions session SCHEDULED → IN_PROGRESS on start. */
+    public void markStarted(String sessionId, String startedAt) {
+        ddb.updateItem(UpdateItemRequest.builder()
+                .tableName(TABLE)
+                .key(key(sessionId))
+                .updateExpression("SET #st = :inprogress, startedAt = :startedAt, isAvailable = :false, updatedAt = :now")
+                .expressionAttributeNames(Map.of("#st", "status"))
+                .expressionAttributeValues(Map.of(
+                        ":inprogress", s("IN_PROGRESS"),
+                        ":startedAt",  s(startedAt),
+                        ":false",      AttributeValue.builder().bool(false).build(),
+                        ":now",        s(now()),
+                        ":scheduled",  s("SCHEDULED")))
+                .conditionExpression("attribute_exists(sessionId) AND #st = :scheduled")
+                .build());
+    }
+
+    /** Transitions session IN_PROGRESS → COMPLETED on end. */
+    public void markCompleted(String sessionId, String endedAt) {
+        ddb.updateItem(UpdateItemRequest.builder()
+                .tableName(TABLE)
+                .key(key(sessionId))
+                .updateExpression("SET #st = :completed, endedAt = :endedAt, updatedAt = :now")
+                .expressionAttributeNames(Map.of("#st", "status"))
+                .expressionAttributeValues(Map.of(
+                        ":completed",  s("COMPLETED"),
+                        ":endedAt",    s(endedAt),
+                        ":now",        s(now()),
+                        ":inprogress", s("IN_PROGRESS")))
+                .conditionExpression("attribute_exists(sessionId) AND #st = :inprogress")
+                .build());
+    }
+
     /** Atomically increments pendingCount. */
     public void incrementPendingCount(String sessionId) {
         ddb.updateItem(UpdateItemRequest.builder()

@@ -28,6 +28,8 @@ Java + AWS Lambda + API Gateway + DynamoDB, deployed via AWS CDK. This is the ba
 | | GET | `/sessions/{sessionId}` |
 | | PUT | `/sessions/{sessionId}` |
 | | DELETE | `/sessions/{sessionId}` |
+| | POST | `/sessions/{sessionId}/start` |
+| | POST | `/sessions/{sessionId}/end` |
 | **Mappings** | POST | `/mappings` |
 | | GET | `/mappings` |
 | | GET | `/mappings/{mappingId}` |
@@ -57,7 +59,7 @@ api/
 │       ├── handler/
 │       │   ├── BaseHandler.java         # Shared JWT auth + convenience helpers
 │       │   ├── auth/                    # 3 handlers  — register client/therapist, login
-│       │   ├── session/                 # 5 handlers  — CRUD + list
+│       │   ├── session/                 # 7 handlers  — CRUD + list + start + end
 │       │   ├── mapping/                 # 6 handlers  — CRUD + mapping-status + journal-access
 │       │   ├── message/                 # 4 handlers  — send, list, update, delete
 │       │   └── appointment/             # 5 handlers  — create, list, get, patch, delete
@@ -88,7 +90,7 @@ api/
             ├── LambdaFactory.java             # Shared factory — DRY config (runtime, memory, timeout, env)
             ├── OpenApiSpecProcessor.java      # Reads YAML, injects Lambda integrations at synth time
             ├── AuthApiConstruct.java          # 3 auth Lambdas + IAM grants
-            ├── SessionsApiConstruct.java      # 5 session Lambdas + IAM grants
+            ├── SessionsApiConstruct.java      # 7 session Lambdas + IAM grants
             ├── MappingsApiConstruct.java      # 6 mapping Lambdas + IAM grants
             ├── MessagesApiConstruct.java      # 4 message Lambdas + IAM grants
             └── AppointmentsApiConstruct.java  # 5 appointment Lambdas + IAM grants
@@ -202,7 +204,7 @@ See [db_design/](../db_design/) for the full schema, index projections, and acce
 
 ## Design Decisions and Assumptions
 
-1. **One Lambda per API** — 23 separate Lambda functions (3 auth + 5 sessions + 6 mappings + 4 messages + 5 appointments). Each handler class is kept under ~200 lines and has a single responsibility.
+1. **One Lambda per API** — 25 separate Lambda functions (3 auth + 7 sessions + 6 mappings + 4 messages + 5 appointments). Each handler class is kept under ~200 lines and has a single responsibility.
 
 2. **SpecRestApi + OpenApiSpecProcessor** — `OpenApiSpecProcessor` reads the OpenAPI YAML at CDK synth time, injects `x-amazon-apigateway-integration` blocks for each implemented route, and fills unimplemented routes with 501 mock integrations. The resulting map is passed to `SpecRestApi.ApiDefinition.fromInline()`, making the spec the authoritative source of truth for API Gateway.
 
@@ -231,6 +233,12 @@ See [db_design/](../db_design/) for the full schema, index projections, and acce
 14. **Therapist list appointments** — therapists must supply a `sessionId` query parameter and may only list appointments for sessions they own. This scopes the query to `GSI_SessionAppointments`, which is more efficient than scanning all therapist appointments.
 
 15. **Delete guardrails** — appointment deletion is restricted to `PENDING` and `REJECTED` states; session deletion is restricted to `SCHEDULED` state.
+
+16. **Session start window** — a session can only be started on or after `scheduledAt` and before `scheduledAt + durationMinutes`. This prevents both early starts and starting a session whose time window has already passed.
+
+17. **Session start requires a confirmed appointment** — `POST /sessions/{id}/start` checks for a non-blank `confirmedAppointmentId` on the session item. This is an O(1) check; no appointment table query is needed.
+
+18. **Ending a session completes the appointment** — `POST /sessions/{id}/end` marks the session `COMPLETED`, sets `endedAt`, and then attempts to mark the linked `CONFIRMED` appointment as `COMPLETED`. The appointment update is best-effort: a failure is logged but does not roll back the session completion.
 
 ---
 

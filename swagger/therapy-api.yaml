@@ -2531,25 +2531,25 @@ paths:
       tags: [Sessions]
       summary: Start a session
       description: |
-        **Therapist only (session owner).** Marks the session as IN_PROGRESS.
+        **Therapist only (session owner).** Marks the session as `IN_PROGRESS`.
 
-        **Preconditions**:
+        **Preconditions** (checked in order):
 
-        | Condition | Failure |
-        |---|---|
-        | Session must exist | 404 |
-        | Caller must be the session owner | 403 |
-        | Session `status` must be `SCHEDULED` | 422 |
-        | A `CONFIRMED` appointment must exist for this session | 422 |
-        | Current server time must be on or after `scheduledAt` | 422 |
+        | # | Condition | Failure |
+        |---|---|---|
+        | 1 | Session must exist | 404 |
+        | 2 | Caller must be the therapist who created the session | 403 |
+        | 3 | Session `status` must be `SCHEDULED` | 422 |
+        | 4 | Session must have a `confirmedAppointmentId` (i.e. a CONFIRMED appointment is linked) | 422 |
+        | 5 | Current server time must be **on or after** `scheduledAt` | 422 |
+        | 6 | Current server time must be **before** `scheduledAt + durationMinutes` (session window must not have passed) | 422 |
 
         **Side effects**:
         - Session `status` → `IN_PROGRESS`
         - Session `startedAt` set to current server timestamp
-        - Session `isAvailable` → `false` if not already
+        - Session `isAvailable` → `false` (if not already)
 
-        The time check is enforced server-side regardless of what the client sends.
-        A descriptive 422 error with `scheduledAt` and `currentTime` is returned if called too early.
+        All time checks are enforced server-side. A descriptive 422 is returned for preconditions 5 and 6, including `scheduledAt`, `sessionEnd`, and `currentTime` for debugging.
       operationId: startSession
       parameters:
         - $ref: "#/components/parameters/SessionIdPath"
@@ -2576,20 +2576,22 @@ paths:
       tags: [Sessions]
       summary: End a session
       description: |
-        **Therapist only (session owner).** Marks the session as COMPLETED.
+        **Therapist only (session owner).** Marks the session as `COMPLETED`.
 
-        **Preconditions**:
+        **Preconditions** (checked in order):
 
-        | Condition | Failure |
-        |---|---|
-        | Session must exist | 404 |
-        | Caller must be the session owner | 403 |
-        | Session `status` must be `IN_PROGRESS` | 422 |
+        | # | Condition | Failure |
+        |---|---|---|
+        | 1 | Session must exist | 404 |
+        | 2 | Caller must be the therapist who created the session | 403 |
+        | 3 | Session `status` must be `IN_PROGRESS` (session must have been started first) | 422 |
 
         **Side effects**:
         - Session `status` → `COMPLETED`
         - Session `endedAt` set to current server timestamp
-        - The `CONFIRMED` appointment for this session → `COMPLETED`
+        - The linked `CONFIRMED` appointment (`confirmedAppointmentId`) → `COMPLETED`
+
+        The appointment completion is best-effort: if the appointment update fails (e.g. already in a terminal state), the session is still marked `COMPLETED` and the error is logged.
       operationId: endSession
       parameters:
         - $ref: "#/components/parameters/SessionIdPath"

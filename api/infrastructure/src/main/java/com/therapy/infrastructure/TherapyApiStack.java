@@ -66,11 +66,13 @@ public class TherapyApiStack extends Stack {
         processor.addLambdaIntegration("/auth/login",               "post", auth.getLogin().getFunctionArn(),             region);
 
         // Sessions
-        processor.addLambdaIntegration("/sessions",              "post",   sessions.getCreateSession().getFunctionArn(), region);
-        processor.addLambdaIntegration("/sessions",              "get",    sessions.getListSessions().getFunctionArn(),  region);
-        processor.addLambdaIntegration("/sessions/{sessionId}",  "get",    sessions.getGetSession().getFunctionArn(),    region);
-        processor.addLambdaIntegration("/sessions/{sessionId}",  "put",    sessions.getUpdateSession().getFunctionArn(), region);
-        processor.addLambdaIntegration("/sessions/{sessionId}",  "delete", sessions.getDeleteSession().getFunctionArn(), region);
+        processor.addLambdaIntegration("/sessions",                       "post",   sessions.getCreateSession().getFunctionArn(), region);
+        processor.addLambdaIntegration("/sessions",                       "get",    sessions.getListSessions().getFunctionArn(),  region);
+        processor.addLambdaIntegration("/sessions/{sessionId}",           "get",    sessions.getGetSession().getFunctionArn(),    region);
+        processor.addLambdaIntegration("/sessions/{sessionId}",           "put",    sessions.getUpdateSession().getFunctionArn(), region);
+        processor.addLambdaIntegration("/sessions/{sessionId}",           "delete", sessions.getDeleteSession().getFunctionArn(), region);
+        processor.addLambdaIntegration("/sessions/{sessionId}/start",     "post",   sessions.getStartSession().getFunctionArn(),  region);
+        processor.addLambdaIntegration("/sessions/{sessionId}/end",       "post",   sessions.getEndSession().getFunctionArn(),    region);
 
         // Mappings
         processor.addLambdaIntegration("/mappings",                              "post",   mappings.getCreateMapping().getFunctionArn(),       region);
@@ -121,6 +123,7 @@ public class TherapyApiStack extends Stack {
                 auth.getRegisterClient(), auth.getRegisterTherapist(), auth.getLogin(),
                 sessions.getCreateSession(), sessions.getListSessions(), sessions.getGetSession(),
                 sessions.getUpdateSession(), sessions.getDeleteSession(),
+                sessions.getStartSession(), sessions.getEndSession(),
                 mappings.getCreateMapping(), mappings.getListMappings(), mappings.getGetMapping(),
                 mappings.getDeleteMapping(), mappings.getUpdateMappingStatus(), mappings.getUpdateJournalAccess(),
                 messages.getSendMessage(), messages.getListMessages(),
