@@ -234,11 +234,15 @@ See [db_design/](../db_design/) for the full schema, index projections, and acce
 
 15. **Delete guardrails** — appointment deletion is restricted to `PENDING` and `REJECTED` states; session deletion is restricted to `SCHEDULED` state.
 
-16. **Session start window** — a session can only be started on or after `scheduledAt` and before `scheduledAt + durationMinutes`. This prevents both early starts and starting a session whose time window has already passed.
+16. **Session duration bounds** — `durationMinutes` must be between 15 and 240 (4 hours) inclusive. The upper bound is enforced at creation and doubles as the look-back window for overlap detection.
 
-17. **Session start requires a confirmed appointment** — `POST /sessions/{id}/start` checks for a non-blank `confirmedAppointmentId` on the session item. This is an O(1) check; no appointment table query is needed.
+17. **Session overlap check** — `POST /sessions` rejects creation if the therapist already has any non-`CANCELLED` session whose time window `[scheduledAt, scheduledAt + durationMinutes)` overlaps with the requested window. The check queries `GSI_TherapistSessions` for sessions starting in the range `[newStart − 4 h, newEnd]` and evaluates the overlap condition in handler code. A 409 is returned with the conflicting session ID.
 
-18. **Ending a session completes the appointment** — `POST /sessions/{id}/end` marks the session `COMPLETED`, sets `endedAt`, and then attempts to mark the linked `CONFIRMED` appointment as `COMPLETED`. The appointment update is best-effort: a failure is logged but does not roll back the session completion.
+18. **Session start window** — a session can only be started on or after `scheduledAt` and before `scheduledAt + durationMinutes`. This prevents both early starts and starting a session whose time window has already passed.
+
+19. **Session start requires a confirmed appointment** — `POST /sessions/{id}/start` checks for a non-blank `confirmedAppointmentId` on the session item. This is an O(1) check; no appointment table query is needed.
+
+20. **Ending a session completes the appointment** — `POST /sessions/{id}/end` marks the session `COMPLETED`, sets `endedAt`, and then attempts to mark the linked `CONFIRMED` appointment as `COMPLETED`. The appointment update is best-effort: a failure is logged but does not roll back the session completion.
 
 ---
 

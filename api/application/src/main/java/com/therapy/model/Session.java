@@ -9,6 +9,7 @@ public class Session {
     public static final int SHARED_NOTES_MAX_CHARS  = 5_000;
     public static final int TITLE_MAX_CHARS         = 200;
     public static final int DESCRIPTION_MAX_CHARS   = 1_000;
+    public static final int MAX_DURATION_MINUTES    = 240;
 
     private String sessionId;
     private String therapistId;

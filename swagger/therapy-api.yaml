@@ -823,6 +823,7 @@ components:
         durationMinutes:
           type: integer
           minimum: 15
+          maximum: 240
           example: 60
 
     UpdateSessionRequest:
@@ -2354,10 +2355,17 @@ paths:
     post:
       tags: [Sessions]
       summary: Create a new session slot
-      description: >
+      description: |
         **Therapist only.** Creates an available session slot that clients can
-        request appointments for.
-        The `therapistId` is derived from the authenticated user's JWT.
+        request appointments for. The `therapistId` is derived from the authenticated user's JWT.
+
+        **Validation rules:**
+        - `title` is required and must not exceed 200 characters.
+        - `scheduledAt` must be a valid ISO-8601 UTC datetime in the future.
+        - `durationMinutes` must be between **15** and **240** (4 hours) inclusive.
+        - The therapist must not have any existing non-`CANCELLED` session whose time window
+          overlaps with `[scheduledAt, scheduledAt + durationMinutes)`. Returns **409** if an
+          overlap is detected, including the conflicting session ID in the error message.
       operationId: createSession
       requestBody:
         required: true
@@ -2378,6 +2386,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "409 – A non-cancelled session already exists in the requested time window."
         "500":
           $ref: "#/components/responses/InternalServerError"
 

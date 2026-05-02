@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 
 public class CreateSessionHandler extends BaseHandler
         implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
@@ -59,6 +60,9 @@ public class CreateSessionHandler extends BaseHandler
         if (duration < 15) {
             return ApiGatewayUtils.badRequest("'durationMinutes' must be at least 15.");
         }
+        if (duration > Session.MAX_DURATION_MINUTES) {
+            return ApiGatewayUtils.badRequest("'durationMinutes' must not exceed " + Session.MAX_DURATION_MINUTES + ".");
+        }
 
         // Validate scheduledAt is a parseable ISO-8601 datetime and is in the future
         Instant scheduledInstant;
@@ -78,6 +82,31 @@ public class CreateSessionHandler extends BaseHandler
         String description = body.hasNonNull("description") ? body.get("description").asText("").trim() : null;
         if (description != null && description.length() > Session.DESCRIPTION_MAX_CHARS) {
             return ApiGatewayUtils.badRequest("'description' must not exceed " + Session.DESCRIPTION_MAX_CHARS + " characters.");
+        }
+
+        // Overlap check: reject if the therapist has any non-CANCELLED session whose
+        // time window [existingStart, existingStart + existingDuration) overlaps with
+        // [scheduledInstant, scheduledInstant + duration).
+        // Query window: [newStart - MAX_DURATION, newEnd] — bounded by the 4-hour cap.
+        Instant newEnd = scheduledInstant.plusSeconds((long) duration * 60);
+        Instant queryFrom = scheduledInstant.minusSeconds((long) Session.MAX_DURATION_MINUTES * 60);
+        List<Session> candidates;
+        try {
+            candidates = REPO.findByTherapistInRange(
+                    caller.getUserId(), queryFrom.toString(), newEnd.toString());
+        } catch (Exception e) {
+            context.getLogger().log("Overlap check error [therapistId=" + caller.getUserId() + "]: " + e.getMessage());
+            return ApiGatewayUtils.internalError();
+        }
+        for (Session existing : candidates) {
+            if ("CANCELLED".equals(existing.getStatus())) continue;
+            Instant existingStart = Instant.parse(existing.getScheduledAt());
+            Instant existingEnd   = existingStart.plusSeconds((long) existing.getDurationMinutes() * 60);
+            if (existingStart.isBefore(newEnd) && existingEnd.isAfter(scheduledInstant)) {
+                return ApiGatewayUtils.conflict(
+                        "Session overlaps with existing session '" + existing.getSessionId() + "' (" +
+                        existing.getScheduledAt() + ", " + existing.getDurationMinutes() + " min).");
+            }
         }
 
         String now = Instant.now().toString();

@@ -623,7 +623,21 @@ GSI
               INCLUDE projection excludes note attributes for same cost reason as above.
 
 ACCESS_PATTERNS
-  API         POST /sessions
+  API         POST /sessions (overlap pre-check)
+  OPERATION   Query (x N pages until exhausted)
+  INDEX       GSI_TherapistSessions
+  KEYS        therapistId = :therapistId,
+              scheduledAt BETWEEN :newStart-4h AND :newEnd
+  NOTES       Fetches all therapist sessions whose start falls in the candidate
+              window. Handler evaluates existingStart < newEnd AND
+              existingEnd > newStart (skipping CANCELLED). Returns 409 if any
+              overlap is found. GSI INCLUDE projection supplies durationMinutes
+              and status — no extra table reads required.
+              durationMinutes is bounded [15, 240]; the 4-hour look-back is
+              derived from the maximum possible duration.
+
+ACCESS_PATTERNS
+  API         POST /sessions (create)
   OPERATION   PutItem
   INDEX       SessionTable
   KEYS        sessionId = :sessionId

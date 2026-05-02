@@ -115,6 +115,36 @@ public class SessionRepository {
         return result;
     }
 
+    /**
+     * Returns all sessions for a therapist whose scheduledAt falls within [from, to].
+     * Paginates internally — no result limit. Used for overlap checks on session creation.
+     */
+    public List<Session> findByTherapistInRange(String therapistId, String from, String to) {
+        Map<String, AttributeValue> vals = new HashMap<>();
+        vals.put(":tid",  s(therapistId));
+        vals.put(":from", s(from));
+        vals.put(":to",   s(to));
+
+        List<Session> result = new ArrayList<>();
+        Map<String, AttributeValue> lastKey = null;
+
+        do {
+            QueryRequest.Builder qb = QueryRequest.builder()
+                    .tableName(TABLE)
+                    .indexName("GSI_TherapistSessions")
+                    .keyConditionExpression("therapistId = :tid AND scheduledAt BETWEEN :from AND :to")
+                    .expressionAttributeValues(vals)
+                    .scanIndexForward(true);
+            if (lastKey != null) qb.exclusiveStartKey(lastKey);
+
+            QueryResponse resp = ddb.query(qb.build());
+            for (Map<String, AttributeValue> item : resp.items()) result.add(itemToSession(item));
+            lastKey = resp.hasLastEvaluatedKey() ? resp.lastEvaluatedKey() : null;
+        } while (lastKey != null);
+
+        return result;
+    }
+
     public void updateWithOwnerCheck(String sessionId, String therapistId, Map<String, Object> fields) {
         StringBuilder expr = new StringBuilder("SET updatedAt = :updatedAt");
         Map<String, AttributeValue> vals = new HashMap<>();
